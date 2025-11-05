@@ -184,6 +184,11 @@ function validateGroupData(data) {
     return { valid: false, errors: ['Invalid data format'] };
   }
   
+  // Initialize users array if missing
+  if (!data.users) {
+    data.users = [];
+  }
+  
   // Validate group name
   if (!data.groupName || typeof data.groupName !== 'string') {
     errors.push('Group name is required');
@@ -206,9 +211,14 @@ function validateGroupData(data) {
     errors.push('Users must be an array');
   } else if (data.users.length > 50) {
     errors.push('Too many users (max 50)');
-  } else {
-    // Validate each user
+  } else if (data.users.length > 0) {
+    // Only validate user structure if users exist
     data.users.forEach((user, index) => {
+      if (!user || typeof user !== 'object') {
+        errors.push(`User ${index + 1}: Invalid user object`);
+        return;
+      }
+      
       if (!user.name || typeof user.name !== 'string') {
         errors.push(`User ${index + 1}: Name is required`);
       } else if (user.name.length > 100) {
@@ -219,9 +229,14 @@ function validateGroupData(data) {
         errors.push(`User ${index + 1}: Wishlist must be an array`);
       } else if (user.wishlist.length > 100) {
         errors.push(`User ${index + 1}: Too many wishlist items (max 100)`);
-      } else {
-        // Validate each wishlist item
+      } else if (user.wishlist.length > 0) {
+        // Only validate wishlist items if they exist
         user.wishlist.forEach((item, itemIndex) => {
+          if (!item || typeof item !== 'object') {
+            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid item object`);
+            return;
+          }
+          
           if (!item.item || typeof item.item !== 'string') {
             errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Item name is required`);
           } else if (item.item.length > 500) {
@@ -253,6 +268,11 @@ function validateGroupData(data) {
 
 // Sanitize entire group data object
 function sanitizeGroupData(data) {
+  // Initialize users if missing
+  if (!data.users) {
+    data.users = [];
+  }
+  
   const sanitized = {
     groupName: sanitizeString(data.groupName, 100),
     eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
@@ -346,6 +366,7 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     const groupData = req.body;
     
     console.log('📝 Received save request for group:', groupId);
+    console.log('📦 Raw data:', JSON.stringify(groupData, null, 2));
     console.log('📦 Data size:', JSON.stringify(groupData).length, 'bytes');
     
     // Validate group ID
@@ -353,7 +374,8 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
       console.log('❌ Invalid group ID format:', groupId);
       return res.status(400).json({ 
         success: false, 
-        message: 'Invalid group ID format' 
+        message: 'Invalid group ID format',
+        debug: { groupId }
       });
     }
     
@@ -361,10 +383,16 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     const validation = validateGroupData(groupData);
     if (!validation.valid) {
       console.log('❌ Validation failed:', validation.errors);
+      console.log('📦 Failed data structure:', JSON.stringify(groupData, null, 2));
       return res.status(400).json({ 
         success: false, 
         message: 'Validation failed',
-        errors: validation.errors
+        errors: validation.errors,
+        debug: {
+          groupName: groupData.groupName,
+          eventType: groupData.eventType,
+          usersCount: groupData.users?.length || 0
+        }
       });
     }
     
@@ -382,6 +410,7 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     }
     
     console.log('✅ Validation passed, saving to database...');
+    console.log('📦 Sanitized data:', JSON.stringify(sanitizedData, null, 2));
     
     // Insert or update group (SQL injection protected via parameterized query)
     await pool.query(
@@ -400,9 +429,11 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('❌ Error saving group:', err);
+    console.error('❌ Stack trace:', err.stack);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error' 
+      message: 'Server error',
+      error: err.message
     });
   }
 });
