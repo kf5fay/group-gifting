@@ -219,6 +219,7 @@
             grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
+            margin-top: 40px;
         }
 
         .wishlist-section {
@@ -661,7 +662,8 @@
             <!-- Others' Wishlists -->
             <div class="wishlists-grid" id="othersWishlists"></div>
 
-            <div class="card" style="text-align: center;">
+            <!-- Reset Section (Creator Only) -->
+            <div class="card" id="resetSection" style="text-align: center; display: none;">
                 <button class="reset-btn" onclick="resetData()">Reset Everything 🔄</button>
             </div>
         </div>
@@ -1052,13 +1054,13 @@
             // Others' wishlists
             renderOthersWishlists();
 
-            // Update reset button visibility
-            const resetBtn = document.querySelector('.reset-btn');
-            if (resetBtn) {
+            // Update reset section visibility
+            const resetSection = document.getElementById('resetSection');
+            if (resetSection) {
                 if (isGroupCreator) {
-                    resetBtn.style.display = 'inline-block';
+                    resetSection.style.display = 'block';
                 } else {
-                    resetBtn.style.display = 'none';
+                    resetSection.style.display = 'none';
                 }
             }
         }
