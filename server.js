@@ -235,31 +235,41 @@ function validateGroupData(data) {
         errors.push(`User ${userName}: Too many wishlist items (max 100)`);
       } else {
         // Validate each wishlist item
-        user.wishlist.forEach((item, itemIndex) => {
-          if (!item || typeof item !== 'object') {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid item object`);
-            return;
-          }
-          
-          if (!item.item || typeof item.item !== 'string') {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name is required`);
-          } else if (item.item.length > 500) {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
-          }
-          
-          if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
-          }
-          
-          if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
-          }
-          
-          // Only validate URL if it's provided and not empty
-          if (item.link && item.link.length > 0 && !validator.isURL(item.link, { require_protocol: false, require_valid_protocol: false })) {
-            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
-          }
-        });
+    user.wishlist.forEach((item, itemIndex) => {
+      // Skip empty or invalid items gracefully
+      if (!item || typeof item !== 'object') {
+        return; // ignore blank entries
+      }
+
+      // Ignore if item name is missing or empty
+      if (!item.item || typeof item.item !== 'string' || item.item.trim() === '') {
+        return;
+      }
+
+      // Item name length check
+      if (item.item.length > 500) {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
+      }
+
+      // Notes length check
+      if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
+      }
+
+      // Price format check
+      if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
+      }
+
+      // URL validation (optional link)
+      if (item.link && item.link.length > 0) {
+        const url = String(item.link).trim();
+        if (!validator.isURL(url, { require_protocol: false, require_valid_protocol: false })) {
+          errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
+        }
+      }
+    });
+
       }
     });
   }
