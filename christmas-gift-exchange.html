@@ -960,6 +960,8 @@
                 people: {}
             };
 
+            if (!groupData.users) groupData.users = {};
+
             groupData.users[userName] = { items: [] };
             currentUser = userName;
             isGroupCreator = true;
