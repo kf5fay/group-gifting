@@ -587,6 +587,9 @@
         let groupData = null;
         let groupId = '';
         let splitModalData = null;
+        let isGroupCreator = false;
+        let pollInterval = null;
+        let lastDataHash = '';
 
         // Generate unique ID
         function generateId() {
@@ -605,6 +608,11 @@
         // Set group ID in URL
         function setGroupId(id) {
             window.location.hash = id;
+        }
+
+        // Create a hash of the data to detect changes
+        function hashData(data) {
+            return JSON.stringify(data);
         }
 
         // API Functions
@@ -652,6 +660,43 @@
             }
         }
 
+        // Live polling for updates
+        async function pollForUpdates() {
+            if (!groupId || !groupData) return;
+
+            try {
+                const freshData = await loadGroupData(groupId);
+                if (freshData) {
+                    const newHash = hashData(freshData);
+                    if (newHash !== lastDataHash) {
+                        // Data has changed, update UI
+                        groupData = freshData;
+                        lastDataHash = newHash;
+                        renderMainView();
+                    }
+                }
+            } catch (error) {
+                console.error('Polling error:', error);
+            }
+        }
+
+        // Start live polling
+        function startPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+            // Poll every 3 seconds
+            pollInterval = setInterval(pollForUpdates, 3000);
+        }
+
+        // Stop polling
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        }
+
         // Snowflake effect
         function createSnowflake() {
             const snowflake = document.createElement('div');
@@ -678,11 +723,19 @@
                 // Try to load existing group
                 groupData = await loadGroupData(groupId);
                 const savedUser = localStorage.getItem(`user_${groupId}`);
+                const savedCreator = localStorage.getItem(`creator_${groupId}`);
 
                 if (groupData) {
+                    // Check if saved user is the creator
+                    if (savedUser && savedUser === groupData.createdBy) {
+                        isGroupCreator = true;
+                    }
+
                     if (savedUser && groupData.people[savedUser]) {
                         currentUser = savedUser;
+                        lastDataHash = hashData(groupData);
                         showMainView();
+                        startPolling();
                     } else {
                         showJoinView();
                     }
@@ -697,6 +750,7 @@
         }
 
         function showSetupView() {
+            stopPolling();
             document.getElementById('setupView').style.display = 'block';
             document.getElementById('joinView').style.display = 'none';
             document.getElementById('mainView').style.display = 'none';
@@ -708,6 +762,7 @@
         }
 
         function showJoinView() {
+            stopPolling();
             document.getElementById('setupView').style.display = 'none';
             document.getElementById('joinView').style.display = 'block';
             document.getElementById('mainView').style.display = 'none';
@@ -744,20 +799,33 @@
                 groupName: groupName,
                 eventType: eventType,
                 eventDate: eventDate,
+                createdBy: userName,
                 people: {}
             };
 
             groupData.people[userName] = { items: [] };
             currentUser = userName;
+            isGroupCreator = true;
 
             await saveData();
+            localStorage.setItem(`creator_${groupId}`, userName);
+            lastDataHash = hashData(groupData);
             showMainView();
+            startPolling();
         });
 
         // Join form submission
         document.getElementById('joinForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const userName = document.getElementById('joinUserName').value.trim();
+
+            // CRITICAL FIX: Reload fresh data before modifying
+            groupData = await loadGroupData(groupId);
+            
+            if (!groupData) {
+                alert('Error loading group data. Please try again.');
+                return;
+            }
 
             if (!groupData.people[userName]) {
                 groupData.people[userName] = { items: [] };
@@ -766,12 +834,15 @@
 
             currentUser = userName;
             localStorage.setItem(`user_${groupId}`, currentUser);
+            lastDataHash = hashData(groupData);
             showMainView();
+            startPolling();
         });
 
         async function saveData() {
             await saveGroupData(groupId, groupData);
             localStorage.setItem(`user_${groupId}`, currentUser);
+            lastDataHash = hashData(groupData);
         }
 
         function copyLink() {
@@ -822,6 +893,16 @@
 
             // Others' wishlists
             renderOthersWishlists();
+
+            // Update reset button visibility
+            const resetBtn = document.querySelector('.reset-btn');
+            if (resetBtn) {
+                if (isGroupCreator) {
+                    resetBtn.style.display = 'inline-block';
+                } else {
+                    resetBtn.style.display = 'none';
+                }
+            }
         }
 
         function renderMyWishlist() {
@@ -932,6 +1013,14 @@
 
             if (!description) return;
 
+            // Reload fresh data before adding
+            groupData = await loadGroupData(groupId);
+            
+            if (!groupData || !groupData.people[currentUser]) {
+                alert('Error loading group data. Please refresh the page.');
+                return;
+            }
+
             groupData.people[currentUser].items.push({
                 description: description,
                 priority: priority,
@@ -946,8 +1035,6 @@
             document.getElementById('newItemPriority').value = 'medium';
             document.getElementById('newItemPrice').value = '';
             
-            // Reload data to get latest
-            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
@@ -959,16 +1046,21 @@
         });
 
         async function claimItem(personName, itemIndex) {
+            // Reload fresh data before claiming
+            groupData = await loadGroupData(groupId);
+            
             if (!groupData.people[personName].items[itemIndex].claimedBy) {
                 groupData.people[personName].items[itemIndex].claimedBy = [];
             }
             groupData.people[personName].items[itemIndex].claimedBy.push(currentUser);
             await saveData();
-            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
         async function unclaimItem(personName, itemIndex) {
+            // Reload fresh data before unclaiming
+            groupData = await loadGroupData(groupId);
+            
             const claimers = groupData.people[personName].items[itemIndex].claimedBy;
             const index = claimers.indexOf(currentUser);
             if (index > -1) {
@@ -978,23 +1070,26 @@
                 groupData.people[personName].items[itemIndex].purchased = false;
             }
             await saveData();
-            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
         async function markPurchased(personName, itemIndex) {
+            // Reload fresh data before marking purchased
+            groupData = await loadGroupData(groupId);
+            
             groupData.people[personName].items[itemIndex].purchased = true;
             await saveData();
-            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
         async function addNotesToItem(personName, itemIndex) {
             const notes = prompt('Add notes (size, color, link, etc.):');
             if (notes && notes.trim()) {
+                // Reload fresh data before adding notes
+                groupData = await loadGroupData(groupId);
+                
                 groupData.people[personName].items[itemIndex].notes = notes.trim();
                 await saveData();
-                groupData = await loadGroupData(groupId);
                 renderMainView();
             }
         }
@@ -1021,12 +1116,14 @@
         async function confirmSplit() {
             if (splitModalData) {
                 const { personName, itemIndex } = splitModalData;
+                
+                // Reload fresh data before splitting
+                groupData = await loadGroupData(groupId);
                 const item = groupData.people[personName].items[itemIndex];
                 
                 if (!item.claimedBy.includes(currentUser)) {
                     item.claimedBy.push(currentUser);
                     await saveData();
-                    groupData = await loadGroupData(groupId);
                     renderMainView();
                 }
             }
@@ -1042,13 +1139,29 @@
         }
 
         async function resetData() {
-            if (confirm('Are you sure you want to reset everything? This will clear all data for everyone in the group.')) {
+            if (!isGroupCreator) {
+                alert('Only the group creator can reset the data.');
+                return;
+            }
+            
+            if (confirm('Are you sure you want to reset everything? This will clear all data for everyone in the group and cannot be undone.')) {
+                stopPolling();
                 await deleteGroupData(groupId);
                 localStorage.removeItem(`user_${groupId}`);
+                localStorage.removeItem(`creator_${groupId}`);
                 window.location.hash = '';
                 location.reload();
             }
         }
+
+        // Clean up polling when page is hidden/closed
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopPolling();
+            } else if (groupId && groupData) {
+                startPolling();
+            }
+        });
 
         // Initialize on load
         init();

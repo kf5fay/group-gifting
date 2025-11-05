@@ -10,6 +10,8 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 - 📅 **Custom Event Dates** - Set specific dates for birthdays, holidays, or any occasion
 - 🎁 **Gift Management** - Add items to your wishlist (no deletion to prevent accidents)
 - 👥 **Multiple Users** - Everyone in the group can join and manage their lists
+- ⚡ **Live Updates** - Changes appear automatically every 3 seconds without refreshing
+- 🔒 **Creator Controls** - Only the person who created the group can reset all data
 
 ### Gift Features
 - ✅ **Claim Gifts** - Click to claim a gift you'll purchase
