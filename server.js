@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,63 +9,97 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Data storage file
-const DATA_FILE = path.join(__dirname, 'groups-data.json');
+// PostgreSQL connection pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? {
+    rejectUnauthorized: false
+  } : false
+});
 
-// Initialize data file if it doesn't exist
-if (!fs.existsSync(DATA_FILE)) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({}));
-}
-
-// Helper functions
-function readData() {
+// Initialize database table
+async function initDatabase() {
   try {
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS groups (
+        group_id VARCHAR(255) PRIMARY KEY,
+        data JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Database initialized successfully');
   } catch (error) {
-    return {};
+    console.error('Error initializing database:', error);
   }
 }
 
-function writeData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-}
+initDatabase();
 
 // API Routes
 
 // Get group data
-app.get('/api/groups/:groupId', (req, res) => {
+app.get('/api/groups/:groupId', async (req, res) => {
   const { groupId } = req.params;
-  const allData = readData();
   
-  if (allData[groupId]) {
-    res.json({ success: true, data: allData[groupId] });
-  } else {
-    res.json({ success: false, message: 'Group not found' });
+  try {
+    const result = await pool.query(
+      'SELECT data FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+    
+    if (result.rows.length > 0) {
+      res.json({ success: true, data: result.rows[0].data });
+    } else {
+      res.json({ success: false, message: 'Group not found' });
+    }
+  } catch (error) {
+    console.error('Error fetching group:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // Create or update group
-app.post('/api/groups/:groupId', (req, res) => {
+app.post('/api/groups/:groupId', async (req, res) => {
   const { groupId } = req.params;
   const groupData = req.body;
   
-  const allData = readData();
-  allData[groupId] = groupData;
-  writeData(allData);
-  
-  res.json({ success: true, message: 'Group saved' });
+  try {
+    await pool.query(
+      `INSERT INTO groups (group_id, data, updated_at) 
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (group_id) 
+       DO UPDATE SET data = $2, updated_at = CURRENT_TIMESTAMP`,
+      [groupId, JSON.stringify(groupData)]
+    );
+    
+    res.json({ success: true, message: 'Group saved' });
+  } catch (error) {
+    console.error('Error saving group:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
 // Delete group (for reset)
-app.delete('/api/groups/:groupId', (req, res) => {
+app.delete('/api/groups/:groupId', async (req, res) => {
   const { groupId } = req.params;
   
-  const allData = readData();
-  delete allData[groupId];
-  writeData(allData);
-  
-  res.json({ success: true, message: 'Group deleted' });
+  try {
+    await pool.query('DELETE FROM groups WHERE group_id = $1', [groupId]);
+    res.json({ success: true, message: 'Group deleted' });
+  } catch (error) {
+    console.error('Error deleting group:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'healthy', database: 'connected' });
+  } catch (error) {
+    res.status(500).json({ status: 'unhealthy', database: 'disconnected' });
+  }
 });
 
 // Serve the main HTML file for any other route
@@ -75,4 +109,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Gift Exchange app running on port ${PORT}`);
+  console.log('Database: PostgreSQL');
 });
