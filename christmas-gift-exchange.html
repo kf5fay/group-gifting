@@ -883,7 +883,7 @@
                         isGroupCreator = true;
                     }
 
-                    if (savedUser && groupData.people[savedUser]) {
+                    if (savedUser && groupData.users[savedUser]) {
                         currentUser = savedUser;
                         lastDataHash = hashData(groupData);
                         showMainView();
@@ -930,7 +930,7 @@
                 <h3 style="color: #2d5a3d; margin-bottom: 10px;">${groupData.groupName}</h3>
                 <p><strong>Event:</strong> ${groupData.eventType}</p>
                 <p><strong>Date:</strong> ${eventDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                <p style="margin-top: 10px;"><strong>${Object.keys(groupData.people).length}</strong> member(s) already joined</p>
+                <p style="margin-top: 10px;"><strong>${Object.keys(groupData.users).length}</strong> member(s) already joined</p>
             `;
         }
 
@@ -960,7 +960,7 @@
                 people: {}
             };
 
-            groupData.people[userName] = { items: [] };
+            groupData.users[userName] = { items: [] };
             currentUser = userName;
             isGroupCreator = true;
 
@@ -987,8 +987,8 @@
                 return;
             }
 
-            if (!groupData.people[userName]) {
-                groupData.people[userName] = { items: [] };
+            if (!groupData.users[userName]) {
+                groupData.users[userName] = { items: [] };
                 await saveData();
             }
 
@@ -1066,7 +1066,7 @@
         }
 
         function renderMyWishlist() {
-            const myItems = groupData.people[currentUser].items;
+            const myItems = groupData.users[currentUser].items;
             const myWishlistDiv = document.getElementById('myWishlist');
             const countBadge = document.getElementById('myWishlistCount');
 
@@ -1100,7 +1100,7 @@
 
         function renderOthersWishlists() {
             const othersDiv = document.getElementById('othersWishlists');
-            const others = Object.keys(groupData.people).filter(name => name !== currentUser);
+            const others = Object.keys(groupData.users).filter(name => name !== currentUser);
 
             if (others.length === 0) {
                 othersDiv.innerHTML = `
@@ -1112,7 +1112,7 @@
             }
 
             othersDiv.innerHTML = others.map(personName => {
-                const items = groupData.people[personName].items;
+                const items = groupData.users[personName].items;
                 return `
                     <div class="card wishlist-section">
                         <div class="wishlist-header">
@@ -1180,12 +1180,12 @@
             // Reload fresh data before adding
             groupData = await loadGroupData(groupId);
             
-            if (!groupData || !groupData.people[currentUser]) {
+            if (!groupData || !groupData.users[currentUser]) {
                 alert('Error loading group data. Please refresh the page.');
                 return;
             }
 
-            groupData.people[currentUser].items.push({
+            groupData.users[currentUser].items.push({
                 description: description,
                 priority: priority,
                 price: price,
@@ -1214,10 +1214,10 @@
             // Reload fresh data before claiming
             groupData = await loadGroupData(groupId);
             
-            if (!groupData.people[personName].items[itemIndex].claimedBy) {
-                groupData.people[personName].items[itemIndex].claimedBy = [];
+            if (!groupData.users[personName].items[itemIndex].claimedBy) {
+                groupData.users[personName].items[itemIndex].claimedBy = [];
             }
-            groupData.people[personName].items[itemIndex].claimedBy.push(currentUser);
+            groupData.users[personName].items[itemIndex].claimedBy.push(currentUser);
             await saveData();
             renderMainView();
         }
@@ -1226,13 +1226,13 @@
             // Reload fresh data before unclaiming
             groupData = await loadGroupData(groupId);
             
-            const claimers = groupData.people[personName].items[itemIndex].claimedBy;
+            const claimers = groupData.users[personName].items[itemIndex].claimedBy;
             const index = claimers.indexOf(currentUser);
             if (index > -1) {
                 claimers.splice(index, 1);
             }
             if (claimers.length === 0) {
-                groupData.people[personName].items[itemIndex].purchased = false;
+                groupData.users[personName].items[itemIndex].purchased = false;
             }
             await saveData();
             renderMainView();
@@ -1242,7 +1242,7 @@
             // Reload fresh data before marking purchased
             groupData = await loadGroupData(groupId);
             
-            groupData.people[personName].items[itemIndex].purchased = true;
+            groupData.users[personName].items[itemIndex].purchased = true;
             await saveData();
             renderMainView();
         }
@@ -1253,14 +1253,14 @@
                 // Reload fresh data before adding notes
                 groupData = await loadGroupData(groupId);
                 
-                groupData.people[personName].items[itemIndex].notes = notes.trim();
+                groupData.users[personName].items[itemIndex].notes = notes.trim();
                 await saveData();
                 renderMainView();
             }
         }
 
         function showSplitModal(personName, itemIndex) {
-            const item = groupData.people[personName].items[itemIndex];
+            const item = groupData.users[personName].items[itemIndex];
             const claimers = item.claimedBy.join(', ');
             
             splitModalData = { personName, itemIndex };
@@ -1284,7 +1284,7 @@
                 
                 // Reload fresh data before splitting
                 groupData = await loadGroupData(groupId);
-                const item = groupData.people[personName].items[itemIndex];
+                const item = groupData.users[personName].items[itemIndex];
                 
                 if (!item.claimedBy.includes(currentUser)) {
                     item.claimedBy.push(currentUser);
@@ -1297,7 +1297,7 @@
 
         // Edit Details Modal Functions
         function showEditDetailsModal(itemIndex) {
-            const item = groupData.people[currentUser].items[itemIndex];
+            const item = groupData.users[currentUser].items[itemIndex];
             editDetailsData = { itemIndex };
             
             document.getElementById('editDetailsTextarea').value = item.details || '';
@@ -1317,12 +1317,12 @@
             // Reload fresh data before saving
             groupData = await loadGroupData(groupId);
             
-            if (!groupData || !groupData.people[currentUser]) {
+            if (!groupData || !groupData.users[currentUser]) {
                 alert('Error loading group data. Please refresh the page.');
                 return;
             }
             
-            groupData.people[currentUser].items[editDetailsData.itemIndex].details = details;
+            groupData.users[currentUser].items[editDetailsData.itemIndex].details = details;
             
             await saveData();
             renderMainView();
