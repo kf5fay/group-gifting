@@ -185,9 +185,9 @@ function validateGroupData(data) {
   }
   
   // Initialize users if missing (as object, not array)
-  if (!data.users) {
-    data.users = data.users || data.people || {};
-  }
+  
+  data.users = data.users || data.people || {};
+  
   
   // Validate group name
   if (!data.groupName || typeof data.groupName !== 'string') {
@@ -229,48 +229,47 @@ function validateGroupData(data) {
         errors.push(`User ${userName}: Name too long (max 100 characters)`);
       }
       
-      if (!Array.isArray(user.wishlist)) {
-        errors.push(`User ${userName}: Wishlist must be an array`);
-      } else if (user.wishlist.length > 100) {
-        errors.push(`User ${userName}: Too many wishlist items (max 100)`);
-      } else {
-        // Validate each wishlist item
-    user.wishlist.forEach((item, itemIndex) => {
-      // Skip empty or invalid items gracefully
+  // Support both 'wishlist' and 'items' arrays
+  const wishlist = Array.isArray(user.wishlist)
+    ? user.wishlist
+    : Array.isArray(user.items)
+      ? user.items
+      : [];
+
+  if (!Array.isArray(wishlist)) {
+    errors.push(`User ${userName}: Wishlist must be an array`);
+  } else if (wishlist.length > 100) {
+    errors.push(`User ${userName}: Too many wishlist items (max 100)`);
+  } else {
+    // Validate each wishlist/item entry
+    wishlist.forEach((item, itemIndex) => {
       if (!item || typeof item !== 'object') {
-        return; // ignore blank entries
+        return; // skip blank
       }
 
-      // Ignore if item name is missing or empty
-      if (!item.item || typeof item.item !== 'string' || item.item.trim() === '') {
-        return;
-      }
+      // Accept 'item' or 'name' as the name field
+      const itemName = item.item || item.name || '';
 
-      // Item name length check
-      if (item.item.length > 500) {
+      if (itemName && typeof itemName !== 'string') {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid item name`);
+      } else if (itemName.length > 500) {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
       }
 
-      // Notes length check
       if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
       }
 
-      // Price format check
       if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
       }
 
-      // URL validation (optional link)
-      if (item.link && item.link.length > 0) {
-        const url = String(item.link).trim();
-        if (!validator.isURL(url, { require_protocol: false, require_valid_protocol: false })) {
-          errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
-        }
+      if (item.link && item.link.length > 0 && !validator.isURL(String(item.link), { require_protocol: false, require_valid_protocol: false })) {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
       }
     });
+  }
 
-      }
     });
   }
   
