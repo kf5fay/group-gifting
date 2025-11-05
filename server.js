@@ -184,9 +184,9 @@ function validateGroupData(data) {
     return { valid: false, errors: ['Invalid data format'] };
   }
   
-  // Initialize users array if missing
+  // Initialize users if missing (as object, not array)
   if (!data.users) {
-    data.users = [];
+    data.users = {};
   }
   
   // Validate group name
@@ -206,54 +206,58 @@ function validateGroupData(data) {
     errors.push('Invalid event date format');
   }
   
-  // Validate users array
-  if (!Array.isArray(data.users)) {
-    errors.push('Users must be an array');
-  } else if (data.users.length > 50) {
-    errors.push('Too many users (max 50)');
-  } else if (data.users.length > 0) {
-    // Only validate user structure if users exist
-    data.users.forEach((user, index) => {
+  // Validate users object (not array!)
+  if (typeof data.users !== 'object' || Array.isArray(data.users)) {
+    errors.push('Users must be an object');
+  } else {
+    const userNames = Object.keys(data.users);
+    
+    if (userNames.length > 50) {
+      errors.push('Too many users (max 50)');
+    }
+    
+    // Validate each user
+    userNames.forEach((userName) => {
+      const user = data.users[userName];
+      
       if (!user || typeof user !== 'object') {
-        errors.push(`User ${index + 1}: Invalid user object`);
+        errors.push(`User ${userName}: Invalid user object`);
         return;
       }
       
-      if (!user.name || typeof user.name !== 'string') {
-        errors.push(`User ${index + 1}: Name is required`);
-      } else if (user.name.length > 100) {
-        errors.push(`User ${index + 1}: Name too long (max 100 characters)`);
+      if (userName.length > 100) {
+        errors.push(`User ${userName}: Name too long (max 100 characters)`);
       }
       
       if (!Array.isArray(user.wishlist)) {
-        errors.push(`User ${index + 1}: Wishlist must be an array`);
+        errors.push(`User ${userName}: Wishlist must be an array`);
       } else if (user.wishlist.length > 100) {
-        errors.push(`User ${index + 1}: Too many wishlist items (max 100)`);
-      } else if (user.wishlist.length > 0) {
-        // Only validate wishlist items if they exist
+        errors.push(`User ${userName}: Too many wishlist items (max 100)`);
+      } else {
+        // Validate each wishlist item
         user.wishlist.forEach((item, itemIndex) => {
           if (!item || typeof item !== 'object') {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid item object`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid item object`);
             return;
           }
           
           if (!item.item || typeof item.item !== 'string') {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Item name is required`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name is required`);
           } else if (item.item.length > 500) {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
           }
           
           if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
           }
           
           if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid price format`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
           }
           
           // Only validate URL if it's provided and not empty
           if (item.link && item.link.length > 0 && !validator.isURL(item.link, { require_protocol: false, require_valid_protocol: false })) {
-            errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid URL format`);
+            errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
           }
         });
       }
@@ -268,34 +272,41 @@ function validateGroupData(data) {
 
 // Sanitize entire group data object
 function sanitizeGroupData(data) {
-  // Initialize users if missing
+  // Initialize users if missing (as object)
   if (!data.users) {
-    data.users = [];
+    data.users = {};
   }
   
   const sanitized = {
     groupName: sanitizeString(data.groupName, 100),
     eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
     eventDate: data.eventDate || null,
-    users: []
+    users: {}
   };
   
-  if (Array.isArray(data.users)) {
-    sanitized.users = data.users.slice(0, 50).map(user => ({
-      name: sanitizeString(user.name, 100),
-      wishlist: Array.isArray(user.wishlist) 
-        ? user.wishlist.slice(0, 100).map(item => ({
-            item: sanitizeString(item.item, 500),
-            notes: item.notes ? sanitizeString(item.notes, 1000) : '',
-            price: item.price ? sanitizeString(String(item.price), 20) : '',
-            link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
-            claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
-            splitWith: Array.isArray(item.splitWith) 
-              ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
-              : []
-          }))
-        : []
-    }));
+  // Handle users as object (not array)
+  if (data.users && typeof data.users === 'object' && !Array.isArray(data.users)) {
+    const userNames = Object.keys(data.users).slice(0, 50); // Max 50 users
+    
+    userNames.forEach(userName => {
+      const user = data.users[userName];
+      const sanitizedUserName = sanitizeString(userName, 100);
+      
+      sanitized.users[sanitizedUserName] = {
+        wishlist: Array.isArray(user.wishlist)
+          ? user.wishlist.slice(0, 100).map(item => ({
+              item: sanitizeString(item.item, 500),
+              notes: item.notes ? sanitizeString(item.notes, 1000) : '',
+              price: item.price ? sanitizeString(String(item.price), 20) : '',
+              link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
+              claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
+              splitWith: Array.isArray(item.splitWith)
+                ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
+                : []
+            }))
+          : []
+      };
+    });
   }
   
   return sanitized;
@@ -413,19 +424,22 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     console.log('📦 Sanitized data:', JSON.stringify(sanitizedData, null, 2));
     
     // Insert or update group (SQL injection protected via parameterized query)
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO groups (group_id, data, updated_at) 
        VALUES ($1, $2, CURRENT_TIMESTAMP)
        ON CONFLICT (group_id) 
-       DO UPDATE SET data = $2, updated_at = CURRENT_TIMESTAMP`,
+       DO UPDATE SET data = $2, updated_at = CURRENT_TIMESTAMP
+       RETURNING data`,
       [groupId, JSON.stringify(sanitizedData)]
     );
     
     console.log('✅ Group saved successfully');
+    console.log('📦 Saved data from DB:', JSON.stringify(result.rows[0].data, null, 2));
     
     res.json({ 
       success: true, 
-      message: 'Group saved successfully' 
+      message: 'Group saved successfully',
+      data: result.rows[0].data  // Return the saved data for verification
     });
   } catch (err) {
     console.error('❌ Error saving group:', err);
