@@ -186,7 +186,7 @@ function validateGroupData(data) {
   
   // Initialize users if missing (as object, not array)
   if (!data.users) {
-    data.users = {};
+    data.users = data.users || data.people || {};
   }
   
   // Validate group name
@@ -281,46 +281,51 @@ function validateGroupData(data) {
 }
 
 // Sanitize entire group data object
+// Sanitize entire group data object
 function sanitizeGroupData(data) {
-  // Initialize users if missing (as object)
-  if (!data.users) {
-    data.users = {};
-  }
-  
+  // Support both 'users' and 'people' keys for compatibility
+  const usersData = data.users || data.people || {};
+
   const sanitized = {
     groupName: sanitizeString(data.groupName, 100),
     eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
     eventDate: data.eventDate || null,
     users: {}
   };
-  
+
   // Handle users as object (not array)
-  if (data.users && typeof data.users === 'object' && !Array.isArray(data.users)) {
-    const userNames = Object.keys(data.users).slice(0, 50); // Max 50 users
-    
+  if (usersData && typeof usersData === 'object' && !Array.isArray(usersData)) {
+    const userNames = Object.keys(usersData).slice(0, 50); // Max 50 users
+
     userNames.forEach(userName => {
-      const user = data.users[userName];
+      const user = usersData[userName];
       const sanitizedUserName = sanitizeString(userName, 100);
-      
+
+      // Support both 'wishlist' and 'items' arrays for compatibility
+      const wishlist = Array.isArray(user.wishlist)
+        ? user.wishlist
+        : Array.isArray(user.items)
+          ? user.items
+          : [];
+
       sanitized.users[sanitizedUserName] = {
-        wishlist: Array.isArray(user.wishlist)
-          ? user.wishlist.slice(0, 100).map(item => ({
-              item: sanitizeString(item.item, 500),
-              notes: item.notes ? sanitizeString(item.notes, 1000) : '',
-              price: item.price ? sanitizeString(String(item.price), 20) : '',
-              link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
-              claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
-              splitWith: Array.isArray(item.splitWith)
-                ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
-                : []
-            }))
-          : []
+        wishlist: wishlist.slice(0, 100).map(item => ({
+          item: sanitizeString(item.item || item.name || '', 500),
+          notes: item.notes ? sanitizeString(item.notes, 1000) : '',
+          price: item.price ? sanitizeString(String(item.price), 20) : '',
+          link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
+          claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
+          splitWith: Array.isArray(item.splitWith)
+            ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
+            : []
+        }))
       };
     });
   }
-  
+
   return sanitized;
 }
+
 
 // ============================================
 // API ENDPOINTS
