@@ -25,7 +25,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"], // Needed for inline scripts in HTML
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for the HTML
+      scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers (onclick, etc.)
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
@@ -190,12 +191,12 @@ function validateGroupData(data) {
     errors.push('Group name too long (max 100 characters)');
   }
   
-  // Validate event type
-  if (!data.eventType || typeof data.eventType !== 'string') {
-    errors.push('Event type is required');
+  // Validate event type (allow empty)
+  if (data.eventType && typeof data.eventType !== 'string') {
+    errors.push('Event type must be a string');
   }
   
-  // Validate event date
+  // Validate event date (optional)
   if (data.eventDate && !isValidDate(data.eventDate)) {
     errors.push('Invalid event date format');
   }
@@ -227,15 +228,16 @@ function validateGroupData(data) {
             errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
           }
           
-          if (item.notes && item.notes.length > 1000) {
+          if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
             errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
           }
           
-          if (item.price && typeof item.price !== 'string') {
+          if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
             errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid price format`);
           }
           
-          if (item.link && !validator.isURL(item.link, { require_protocol: true })) {
+          // Only validate URL if it's provided and not empty
+          if (item.link && item.link.length > 0 && !validator.isURL(item.link, { require_protocol: false, require_valid_protocol: false })) {
             errors.push(`User ${index + 1}, Item ${itemIndex + 1}: Invalid URL format`);
           }
         });
@@ -253,7 +255,7 @@ function validateGroupData(data) {
 function sanitizeGroupData(data) {
   const sanitized = {
     groupName: sanitizeString(data.groupName, 100),
-    eventType: sanitizeString(data.eventType, 50),
+    eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
     eventDate: data.eventDate || null,
     users: []
   };
@@ -265,8 +267,8 @@ function sanitizeGroupData(data) {
         ? user.wishlist.slice(0, 100).map(item => ({
             item: sanitizeString(item.item, 500),
             notes: item.notes ? sanitizeString(item.notes, 1000) : '',
-            price: item.price ? sanitizeString(item.price, 20) : '',
-            link: item.link && validator.isURL(item.link) ? item.link : '',
+            price: item.price ? sanitizeString(String(item.price), 20) : '',
+            link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
             claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
             splitWith: Array.isArray(item.splitWith) 
               ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
@@ -343,8 +345,12 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     const { groupId } = req.params;
     const groupData = req.body;
     
+    console.log('📝 Received save request for group:', groupId);
+    console.log('📦 Data size:', JSON.stringify(groupData).length, 'bytes');
+    
     // Validate group ID
     if (!isValidGroupId(groupId)) {
+      console.log('❌ Invalid group ID format:', groupId);
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid group ID format' 
@@ -354,6 +360,7 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     // Validate group data
     const validation = validateGroupData(groupData);
     if (!validation.valid) {
+      console.log('❌ Validation failed:', validation.errors);
       return res.status(400).json({ 
         success: false, 
         message: 'Validation failed',
@@ -367,11 +374,14 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
     // Check if data size is reasonable (prevent massive objects)
     const dataSize = JSON.stringify(sanitizedData).length;
     if (dataSize > 500000) { // 500KB limit
+      console.log('❌ Data too large:', dataSize, 'bytes');
       return res.status(400).json({ 
         success: false, 
         message: 'Group data too large. Please reduce the number of items.' 
       });
     }
+    
+    console.log('✅ Validation passed, saving to database...');
     
     // Insert or update group (SQL injection protected via parameterized query)
     await pool.query(
@@ -382,12 +392,14 @@ app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
       [groupId, JSON.stringify(sanitizedData)]
     );
     
+    console.log('✅ Group saved successfully');
+    
     res.json({ 
       success: true, 
       message: 'Group saved successfully' 
     });
   } catch (err) {
-    console.error('Error saving group:', err);
+    console.error('❌ Error saving group:', err);
     res.status(500).json({ 
       success: false, 
       message: 'Server error' 
