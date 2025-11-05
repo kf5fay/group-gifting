@@ -607,6 +607,51 @@
             window.location.hash = id;
         }
 
+        // API Functions
+        async function loadGroupData(groupId) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}`);
+                const result = await response.json();
+                if (result.success) {
+                    return result.data;
+                }
+                return null;
+            } catch (error) {
+                console.error('Error loading group:', error);
+                return null;
+            }
+        }
+
+        async function saveGroupData(groupId, data) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                return result.success;
+            } catch (error) {
+                console.error('Error saving group:', error);
+                return false;
+            }
+        }
+
+        async function deleteGroupData(groupId) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                return result.success;
+            } catch (error) {
+                console.error('Error deleting group:', error);
+                return false;
+            }
+        }
+
         // Snowflake effect
         function createSnowflake() {
             const snowflake = document.createElement('div');
@@ -626,17 +671,16 @@
         setInterval(createSnowflake, 300);
 
         // Initialize app
-        function init() {
+        async function init() {
             groupId = getGroupId();
             
             if (groupId) {
                 // Try to load existing group
-                const savedData = localStorage.getItem(`group_${groupId}`);
+                groupData = await loadGroupData(groupId);
                 const savedUser = localStorage.getItem(`user_${groupId}`);
 
-                if (savedData) {
-                    groupData = JSON.parse(savedData);
-                    if (savedUser) {
+                if (groupData) {
+                    if (savedUser && groupData.people[savedUser]) {
                         currentUser = savedUser;
                         showMainView();
                     } else {
@@ -686,7 +730,7 @@
         }
 
         // Setup form submission
-        document.getElementById('setupForm').addEventListener('submit', (e) => {
+        document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const groupName = document.getElementById('groupName').value.trim();
             const eventType = document.getElementById('eventType').value;
@@ -706,18 +750,18 @@
             groupData.people[userName] = { items: [] };
             currentUser = userName;
 
-            saveData();
+            await saveData();
             showMainView();
         });
 
         // Join form submission
-        document.getElementById('joinForm').addEventListener('submit', (e) => {
+        document.getElementById('joinForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const userName = document.getElementById('joinUserName').value.trim();
 
             if (!groupData.people[userName]) {
                 groupData.people[userName] = { items: [] };
-                saveData();
+                await saveData();
             }
 
             currentUser = userName;
@@ -725,8 +769,8 @@
             showMainView();
         });
 
-        function saveData() {
-            localStorage.setItem(`group_${groupId}`, JSON.stringify(groupData));
+        async function saveData() {
+            await saveGroupData(groupId, groupData);
             localStorage.setItem(`user_${groupId}`, currentUser);
         }
 
@@ -880,7 +924,7 @@
             }).join('');
         }
 
-        function addItem() {
+        async function addItem() {
             const input = document.getElementById('newItemInput');
             const description = input.value.trim();
             const priority = document.getElementById('newItemPriority').value;
@@ -897,10 +941,13 @@
                 purchased: false
             });
 
-            saveData();
+            await saveData();
             input.value = '';
             document.getElementById('newItemPriority').value = 'medium';
             document.getElementById('newItemPrice').value = '';
+            
+            // Reload data to get latest
+            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
@@ -911,16 +958,17 @@
             }
         });
 
-        function claimItem(personName, itemIndex) {
+        async function claimItem(personName, itemIndex) {
             if (!groupData.people[personName].items[itemIndex].claimedBy) {
                 groupData.people[personName].items[itemIndex].claimedBy = [];
             }
             groupData.people[personName].items[itemIndex].claimedBy.push(currentUser);
-            saveData();
+            await saveData();
+            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
-        function unclaimItem(personName, itemIndex) {
+        async function unclaimItem(personName, itemIndex) {
             const claimers = groupData.people[personName].items[itemIndex].claimedBy;
             const index = claimers.indexOf(currentUser);
             if (index > -1) {
@@ -929,21 +977,24 @@
             if (claimers.length === 0) {
                 groupData.people[personName].items[itemIndex].purchased = false;
             }
-            saveData();
+            await saveData();
+            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
-        function markPurchased(personName, itemIndex) {
+        async function markPurchased(personName, itemIndex) {
             groupData.people[personName].items[itemIndex].purchased = true;
-            saveData();
+            await saveData();
+            groupData = await loadGroupData(groupId);
             renderMainView();
         }
 
-        function addNotesToItem(personName, itemIndex) {
+        async function addNotesToItem(personName, itemIndex) {
             const notes = prompt('Add notes (size, color, link, etc.):');
             if (notes && notes.trim()) {
                 groupData.people[personName].items[itemIndex].notes = notes.trim();
-                saveData();
+                await saveData();
+                groupData = await loadGroupData(groupId);
                 renderMainView();
             }
         }
@@ -967,14 +1018,15 @@
             splitModalData = null;
         }
 
-        function confirmSplit() {
+        async function confirmSplit() {
             if (splitModalData) {
                 const { personName, itemIndex } = splitModalData;
                 const item = groupData.people[personName].items[itemIndex];
                 
                 if (!item.claimedBy.includes(currentUser)) {
                     item.claimedBy.push(currentUser);
-                    saveData();
+                    await saveData();
+                    groupData = await loadGroupData(groupId);
                     renderMainView();
                 }
             }
@@ -989,9 +1041,9 @@
             }
         }
 
-        function resetData() {
+        async function resetData() {
             if (confirm('Are you sure you want to reset everything? This will clear all data for everyone in the group.')) {
-                localStorage.removeItem(`group_${groupId}`);
+                await deleteGroupData(groupId);
                 localStorage.removeItem(`user_${groupId}`);
                 window.location.hash = '';
                 location.reload();

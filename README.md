@@ -108,8 +108,10 @@ npm start
 ## 🛠️ Technical Details
 
 ### Data Storage
-- Uses browser localStorage for data persistence
+- Uses a **backend API with file-based storage** for true data sharing across users
+- Data is stored in `groups-data.json` on the server (Railway handles persistence)
 - Each group has a unique ID in the URL (hash fragment)
+- Users are remembered in browser localStorage (just for convenience)
 - Data structure:
 ```javascript
 {
@@ -140,6 +142,12 @@ https://your-domain.com/#abc123xyz
                     Unique Group ID
 ```
 
+### API Endpoints
+The backend provides three REST API endpoints:
+- `GET /api/groups/:groupId` - Retrieve group data
+- `POST /api/groups/:groupId` - Create or update group data
+- `DELETE /api/groups/:groupId` - Delete group data (reset)
+
 ### Browser Compatibility
 - Modern browsers (Chrome, Firefox, Safari, Edge)
 - Mobile browsers (iOS Safari, Chrome Mobile)
@@ -159,19 +167,20 @@ Want to customize? Here are some ideas:
 
 **Q: Link doesn't work for others?**
 - Make sure they're using the full URL including the `#` and ID after it
+- Check that your Railway app is still running
 
 **Q: Data disappeared?**
-- Check if browser localStorage was cleared
-- Make sure you're using the same browser/device
-- Consider adding a backend database for persistence
+- Check if the Railway app restarted (data persists in `groups-data.json`)
+- Make sure the file wasn't deleted from the server
 
 **Q: Can't see others' lists?**
 - Make sure everyone is using the SAME link (with the same group ID)
 - Try refreshing the page
+- Check that the backend API is responding (look in browser console for errors)
 
-**Q: Want to make it more permanent?**
-- Consider adding a backend database (Firebase, Supabase, etc.)
-- Current version uses localStorage which is browser-specific
+**Q: Changes not showing up for others?**
+- Have them refresh their browser
+- Check Railway logs for any errors
 
 ## 📝 License
 
@@ -179,6 +188,7 @@ Free to use and modify for personal or commercial purposes!
 
 ## 🎁 Future Enhancement Ideas
 
+- Real-time updates (WebSockets for instant syncing without refresh)
 - Email/SMS notifications when someone claims your item
 - Export lists as PDF/CSV
 - Import wishlists from Amazon/other sites
@@ -188,10 +198,10 @@ Free to use and modify for personal or commercial purposes!
 - Gift recommendations based on interests
 - Integration with online stores
 - Mobile app version
-- Backend database for cross-device sync
-- User accounts with profiles
+- User accounts with profiles and history
 - Comment threads on items
 - Image uploads for gifts
+- Database backup/restore feature
 
 ---
 

@@ -33,10 +33,14 @@
 ## Post-Deployment
 - [ ] Visit your Railway URL
 - [ ] Test creating a new group
+- [ ] Copy the unique link (including the #groupId part)
+- [ ] Open the link in a different browser or incognito window
+- [ ] Test that you can join the group and see it properly
 - [ ] Share the unique link with a friend/family member
 - [ ] Test that they can join and add items
 - [ ] Test claiming gifts
 - [ ] Test the split gift feature
+- [ ] Verify data persists after refresh
 
 ## Alternative: Railway CLI
 ```bash
@@ -68,10 +72,15 @@ railway domain
 - Check that PORT environment variable is being used
 - Review server logs in Railway dashboard
 
-### Data Not Persisting Across Users
-- This is expected! Each browser stores data locally
-- For shared data, you'd need to add a backend database
-- Current version works great for the same device/browser
+### Sharing Not Working
+- **This is now fixed!** The app uses a backend API so data is shared properly
+- Make sure you copy the FULL URL including the `#groupId` part
+- Test in an incognito window to verify sharing works
+
+### Data Not Persisting
+- Railway automatically persists the `groups-data.json` file
+- Data survives app restarts and redeployments
+- Only gets cleared if you manually delete it or reset from the app
 
 ## Environment Variables (Optional)
 Railway automatically sets:
