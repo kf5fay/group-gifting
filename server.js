@@ -4,29 +4,21 @@ const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const validator = require('validator');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ============================================
-// TRUST PROXY (Required for Railway/proxies)
-// ============================================
-
-// Trust Railway's proxy to get real client IPs
-// This is essential for rate limiting to work correctly
+// Trust proxy for Railway deployment
 app.set('trust proxy', 1);
 
-// ============================================
-// SECURITY MIDDLEWARE
-// ============================================
-
-// 1. Helmet - Sets security headers
+// Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for the HTML
-      scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers (onclick, etc.)
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
@@ -36,158 +28,102 @@ app.use(helmet({
       frameSrc: ["'none'"]
     }
   },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
+  crossOriginEmbedderPolicy: false
 }));
 
-// 2. CORS Protection - Only allow your domain
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    process.env.FRONTEND_URL, // Your Railway domain
-    'http://localhost:3000', // Local development
-    'http://127.0.0.1:3000'
-  ].filter(Boolean);
+// JSON parsing with size limit
+app.use(express.json({ limit: '1mb' }));
 
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || !origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  next();
-});
+// Serve static files
+app.use(express.static(__dirname));
 
-// 3. Rate Limiting - Prevent spam/DoS attacks
+// Configure email transporter (for contact form)
+let emailTransporter = null;
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  emailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+  console.log('✅ Email service configured');
+} else {
+  console.log('⚠️  Email not configured (set EMAIL_USER and EMAIL_PASS environment variables)');
+}
+
+// Rate limiting - General protection
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  max: 100,
+  message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 
-const createGroupLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // Limit to 10 group creations per hour per IP
-  message: 'Too many groups created, please try again later.',
-  skipSuccessfulRequests: false
-});
-
+// Stricter rate limit for API operations
 const apiLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // Limit each IP to 30 API requests per minute
-  message: 'Too many API requests, please slow down.',
-  standardHeaders: true,
-  legacyHeaders: false
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  message: { success: false, message: 'Too many API requests, please slow down.' }
 });
 
-app.use('/api/', apiLimiter);
+// Very strict limit for group creation
+const groupCreationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  message: { success: false, message: 'Too many groups created, please try again later.' }
+});
 
-// 4. Size Limits - Prevent database bloat
-app.use(express.json({ 
-  limit: '1mb', // Maximum request size
-  verify: (req, res, buf, encoding) => {
-    // Store raw body for additional validation if needed
-    req.rawBody = buf.toString(encoding || 'utf8');
-  }
-}));
+// Rate limit for contact form
+const contactLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  message: { success: false, message: 'Too many contact submissions, please try again later.' }
+});
 
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '1mb' 
-}));
+// Apply general rate limiting to all requests
+app.use(generalLimiter);
 
-// ============================================
-// DATABASE CONNECTION
-// ============================================
-
+// PostgreSQL connection pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: false
-  } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Initialize database
-async function initializeDatabase() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS groups (
-        group_id VARCHAR(255) PRIMARY KEY,
-        data JSONB NOT NULL,
-        password_hash VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    
-    // Create index for faster queries
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_groups_updated 
-      ON groups(updated_at)
-    `);
-    
-    console.log('Database initialized successfully');
-  } catch (err) {
-    console.error('Database initialization error:', err);
-  }
-}
+// Database initialization
+pool.query(`
+  CREATE TABLE IF NOT EXISTS groups (
+    group_id VARCHAR(255) PRIMARY KEY,
+    data JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).then(() => {
+  console.log('✅ Database initialized successfully');
+}).catch(err => {
+  console.error('❌ Database initialization error:', err);
+});
 
-initializeDatabase();
-
-// ============================================
-// INPUT VALIDATION & SANITIZATION
-// ============================================
-
-// Sanitize string input
-function sanitizeString(input, maxLength = 500) {
-  if (typeof input !== 'string') return '';
+// Helper function to sanitize strings
+function sanitizeString(str, maxLength = 500) {
+  if (typeof str !== 'string') return '';
   
   // Remove any HTML tags and scripts
-  let sanitized = input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<[^>]+>/g, '')
-    .trim();
+  let sanitized = str.replace(/<[^>]*>/g, '');
   
-  // Escape special characters
-  sanitized = validator.escape(sanitized);
+  // Remove potentially dangerous characters
+  sanitized = sanitized.replace(/[<>\"\']/g, '');
   
-  // Limit length
-  return sanitized.substring(0, maxLength);
+  // Trim and limit length
+  sanitized = sanitized.trim().substring(0, maxLength);
+  
+  return sanitized;
 }
 
-// Validate group ID format
-function isValidGroupId(groupId) {
-  return /^[a-zA-Z0-9-]{6,20}$/.test(groupId);
-}
-
-// Validate date format
-function isValidDate(dateString) {
-  if (!dateString) return true; // Optional dates
-  return validator.isISO8601(dateString, { strict: true });
-}
-
-// Validate and sanitize group data
+// Helper function to validate and sanitize group data
 function validateGroupData(data) {
   const errors = [];
-  
-  if (!data || typeof data !== 'object') {
-    return { valid: false, errors: ['Invalid data format'] };
-  }
-  
-  // Initialize users if missing (as object, not array)
-  
-  data.users = data.users || data.people || {};
-  
   
   // Validate group name
   if (!data.groupName || typeof data.groupName !== 'string') {
@@ -196,181 +132,136 @@ function validateGroupData(data) {
     errors.push('Group name too long (max 100 characters)');
   }
   
-  // Validate event type (allow empty)
-  if (data.eventType && typeof data.eventType !== 'string') {
-    errors.push('Event type must be a string');
+  // Validate holiday type
+  const validHolidays = ['Christmas', 'Birthday', 'Hanukkah', 'Anniversary', 'Other'];
+  if (data.holiday && !validHolidays.includes(data.holiday)) {
+    errors.push('Invalid holiday type');
   }
   
-  // Validate event date (optional)
-  if (data.eventDate && !isValidDate(data.eventDate)) {
+  // Validate event date
+  if (data.eventDate && !validator.isISO8601(data.eventDate)) {
     errors.push('Invalid event date format');
   }
   
-  // Validate users object (not array!)
-  if (typeof data.users !== 'object' || Array.isArray(data.users)) {
+  // Validate users object
+  if (!data.users || typeof data.users !== 'object' || Array.isArray(data.users)) {
     errors.push('Users must be an object');
   } else {
-    const userNames = Object.keys(data.users);
-    
-    if (userNames.length > 50) {
+    // Validate each user
+    const usernames = Object.keys(data.users);
+    if (usernames.length > 50) {
       errors.push('Too many users (max 50)');
     }
     
-    // Validate each user
-    userNames.forEach((userName) => {
-      const user = data.users[userName];
-      
-      if (!user || typeof user !== 'object') {
-        errors.push(`User ${userName}: Invalid user object`);
-        return;
+    for (const username of usernames) {
+      if (username.length > 100) {
+        errors.push(`Username too long: ${username}`);
       }
       
-      if (userName.length > 100) {
-        errors.push(`User ${userName}: Name too long (max 100 characters)`);
+      const user = data.users[username];
+      if (!user.items || !Array.isArray(user.items)) {
+        errors.push(`Invalid items for user: ${username}`);
+      } else if (user.items.length > 100) {
+        errors.push(`Too many items for user ${username} (max 100)`);
+      } else {
+        // Validate each item
+        for (const item of user.items) {
+          const itemName = item.description || item.item || item.name || '';
+          if (!itemName || typeof itemName !== 'string') {
+            errors.push(`Item missing description for user: ${username}`);
+          } else if (itemName.length > 500) {
+            errors.push(`Item description too long for user: ${username}`);
+          }
+          
+          if (item.details && typeof item.details === 'string' && item.details.length > 1000) {
+            errors.push(`Item details too long for user: ${username}`);
+          }
+          
+          if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
+            errors.push(`Item notes too long for user: ${username}`);
+          }
+          
+          if (item.claimedBy && !Array.isArray(item.claimedBy)) {
+            errors.push(`claimedBy must be an array for user: ${username}`);
+          }
+        }
       }
-      
-  // Support both 'wishlist' and 'items' arrays
-  const wishlist = Array.isArray(user.wishlist)
-    ? user.wishlist
-    : Array.isArray(user.items)
-      ? user.items
-      : [];
-
-  if (!Array.isArray(wishlist)) {
-    errors.push(`User ${userName}: Wishlist/items must be an array`);
-  } else if (wishlist.length > 100) {
-    errors.push(`User ${userName}: Too many wishlist items (max 100)`);
-  } else {
-    // Validate each wishlist/item entry
-    wishlist.forEach((item, itemIndex) => {
-      if (!item || typeof item !== 'object') {
-        return; // skip blank
-      }
-
-      // Accept 'description', 'item', or 'name' as the name field
-      const itemName = item.description || item.item || item.name || '';
-
-      if (itemName && typeof itemName !== 'string') {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid item name`);
-      } else if (itemName.length > 500) {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Item name too long (max 500 characters)`);
-      }
-
-      if (item.notes && typeof item.notes === 'string' && item.notes.length > 1000) {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
-      }
-
-      if (item.details && typeof item.details === 'string' && item.details.length > 1000) {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Details too long (max 1000 characters)`);
-      }
-
-      if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
-      }
-
-      if (item.link && item.link.length > 0 && !validator.isURL(String(item.link), { require_protocol: false, require_valid_protocol: false })) {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
-      }
-
-      // Validate claimedBy is an array (not a string)
-      if (item.claimedBy && !Array.isArray(item.claimedBy)) {
-        errors.push(`User ${userName}, Item ${itemIndex + 1}: claimedBy must be an array`);
-      }
-    });
-  }
-
-    });
+    }
   }
   
-  return {
-    valid: errors.length === 0,
-    errors
-  };
+  return errors;
 }
 
-// Sanitize entire group data object
+// Helper function to sanitize group data
 function sanitizeGroupData(data) {
-  // Support both 'users' and 'people' keys for compatibility
-  const usersData = data.users || data.people || {};
-
   const sanitized = {
     groupName: sanitizeString(data.groupName, 100),
-    eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
-    eventDate: data.eventDate || null,
+    holiday: data.holiday && ['Christmas', 'Birthday', 'Hanukkah', 'Anniversary', 'Other'].includes(data.holiday) 
+      ? data.holiday 
+      : 'Christmas',
+    eventDate: data.eventDate || '',
     createdBy: data.createdBy ? sanitizeString(data.createdBy, 100) : '',
     users: {}
   };
-
-  // Handle users as object (not array)
-  if (usersData && typeof usersData === 'object' && !Array.isArray(usersData)) {
-    const userNames = Object.keys(usersData).slice(0, 50); // Max 50 users
-
-    userNames.forEach(userName => {
-      const user = usersData[userName];
-      const sanitizedUserName = sanitizeString(userName, 100);
-
-      // Support both 'wishlist' and 'items' arrays for compatibility
-      const itemsList = Array.isArray(user.items)
-        ? user.items
-        : Array.isArray(user.wishlist)
-          ? user.wishlist
-          : [];
-
-      // CRITICAL: Save as 'items' to match frontend expectation
-      sanitized.users[sanitizedUserName] = {
-        items: itemsList.slice(0, 100).map(item => ({
-          // Map frontend field names correctly
-          description: sanitizeString(item.description || item.item || item.name || '', 500),
-          priority: item.priority || 'medium',
-          price: item.price ? sanitizeString(String(item.price), 20) : '',
-          notes: item.notes ? sanitizeString(item.notes, 1000) : '',
-          details: item.details ? sanitizeString(item.details, 1000) : '',
-          // claimedBy MUST be an array, not a string
-          claimedBy: Array.isArray(item.claimedBy)
-            ? item.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100))
-            : [],
-          purchased: Boolean(item.purchased),
-          splitWith: Array.isArray(item.splitWith)
-            ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
-            : []
-        }))
+  
+  // Sanitize users
+  if (data.users && typeof data.users === 'object') {
+    const usernames = Object.keys(data.users).slice(0, 50);
+    
+    for (const username of usernames) {
+      const cleanUsername = sanitizeString(username, 100);
+      const user = data.users[username];
+      
+      sanitized.users[cleanUsername] = {
+        items: Array.isArray(user.items) 
+          ? user.items.slice(0, 100).map(item => ({
+              description: sanitizeString(item.description || item.item || item.name || '', 500),
+              priority: item.priority && ['high', 'medium', 'low'].includes(item.priority) 
+                ? item.priority 
+                : 'medium',
+              price: item.price ? sanitizeString(String(item.price), 20) : '',
+              notes: item.notes ? sanitizeString(item.notes, 1000) : '',
+              details: item.details ? sanitizeString(item.details, 1000) : '',
+              claimedBy: Array.isArray(item.claimedBy) 
+                ? item.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100))
+                : [],
+              purchased: Boolean(item.purchased),
+              splitWith: Array.isArray(item.splitWith)
+                ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
+                : []
+            }))
+          : []
       };
-    });
+    }
   }
-
+  
   return sanitized;
 }
 
-
-// ============================================
-// API ENDPOINTS
-// ============================================
-
-// Health check
+// Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.json({ 
-      status: 'healthy', 
-      database: 'connected',
+      success: true, 
+      message: 'Server and database healthy',
       timestamp: new Date().toISOString()
     });
-  } catch (err) {
-    res.status(503).json({ 
-      status: 'unhealthy', 
-      database: 'disconnected',
-      error: 'Database connection failed'
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Database connection error' 
     });
   }
 });
 
-// Get group data
-app.get('/api/groups/:groupId', async (req, res) => {
+// GET group data
+app.get('/api/groups/:groupId', apiLimiter, async (req, res) => {
   try {
-    const { groupId } = req.params;
+    const groupId = req.params.groupId;
     
-    // Validate group ID
-    if (!isValidGroupId(groupId)) {
+    // Validate groupId format
+    if (!groupId || groupId.length > 255 || !/^[a-zA-Z0-9-_]+$/.test(groupId)) {
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid group ID format' 
@@ -378,225 +269,225 @@ app.get('/api/groups/:groupId', async (req, res) => {
     }
     
     const result = await pool.query(
-      'SELECT data, updated_at FROM groups WHERE group_id = $1',
+      'SELECT data FROM groups WHERE group_id = $1',
       [groupId]
     );
     
     if (result.rows.length === 0) {
-      return res.json({ success: false, message: 'Group not found' });
+      return res.json({ success: true, data: null });
     }
     
-    res.json({ 
-      success: true, 
-      data: result.rows[0].data,
-      lastUpdated: result.rows[0].updated_at
-    });
-  } catch (err) {
-    console.error('Error fetching group:', err);
+    res.json({ success: true, data: result.rows[0].data });
+  } catch (error) {
+    console.error('Error loading group:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error' 
+      message: 'Error loading group data' 
     });
   }
 });
 
-// Create/update group data
-app.post('/api/groups/:groupId', createGroupLimiter, async (req, res) => {
+// POST/UPDATE group data
+app.post('/api/groups/:groupId', apiLimiter, async (req, res) => {
   try {
-    const { groupId } = req.params;
+    const groupId = req.params.groupId;
     const groupData = req.body;
     
-    console.log('📝 Received save request for group:', groupId);
-    console.log('📦 Raw data:', JSON.stringify(groupData, null, 2));
-    console.log('📦 Data size:', JSON.stringify(groupData).length, 'bytes');
-    
-    // Validate group ID
-    if (!isValidGroupId(groupId)) {
-      console.log('❌ Invalid group ID format:', groupId);
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid group ID format',
-        debug: { groupId }
-      });
-    }
-    
-    // Validate group data
-    const validation = validateGroupData(groupData);
-    if (!validation.valid) {
-      console.log('❌ Validation failed:', validation.errors);
-      console.log('📦 Failed data structure:', JSON.stringify(groupData, null, 2));
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Validation failed',
-        errors: validation.errors,
-        debug: {
-          groupName: groupData.groupName,
-          eventType: groupData.eventType,
-          usersCount: groupData.users?.length || 0
-        }
-      });
-    }
-    
-    // Sanitize data
-    const sanitizedData = sanitizeGroupData(groupData);
-    
-    // Check if data size is reasonable (prevent massive objects)
-    const dataSize = JSON.stringify(sanitizedData).length;
-    if (dataSize > 500000) { // 500KB limit
-      console.log('❌ Data too large:', dataSize, 'bytes');
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Group data too large. Please reduce the number of items.' 
-      });
-    }
-    
-    console.log('✅ Validation passed, saving to database...');
-    console.log('📦 Sanitized data:', JSON.stringify(sanitizedData, null, 2));
-    
-    // Insert or update group (SQL injection protected via parameterized query)
-    const result = await pool.query(
-      `INSERT INTO groups (group_id, data, updated_at) 
-       VALUES ($1, $2, CURRENT_TIMESTAMP)
-       ON CONFLICT (group_id) 
-       DO UPDATE SET data = $2, updated_at = CURRENT_TIMESTAMP
-       RETURNING data`,
-      [groupId, JSON.stringify(sanitizedData)]
-    );
-    
-    console.log('✅ Group saved successfully');
-    console.log('📦 Saved data from DB:', JSON.stringify(result.rows[0].data, null, 2));
-    
-    res.json({ 
-      success: true, 
-      message: 'Group saved successfully',
-      data: result.rows[0].data  // Return the saved data for verification
-    });
-  } catch (err) {
-    console.error('❌ Error saving group:', err);
-    console.error('❌ Stack trace:', err.stack);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error',
-      error: err.message
-    });
-  }
-});
-
-// Delete group (with optional password protection)
-app.delete('/api/groups/:groupId', async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    
-    // Validate group ID
-    if (!isValidGroupId(groupId)) {
+    // Validate groupId format
+    if (!groupId || groupId.length > 255 || !/^[a-zA-Z0-9-_]+$/.test(groupId)) {
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid group ID format' 
       });
     }
     
-    // Delete group (SQL injection protected via parameterized query)
-    const result = await pool.query(
-      'DELETE FROM groups WHERE group_id = $1 RETURNING group_id',
-      [groupId]
-    );
-    
-    if (result.rowCount === 0) {
-      return res.status(404).json({ 
+    // Validate group data
+    const validationErrors = validateGroupData(groupData);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ 
         success: false, 
-        message: 'Group not found' 
+        message: 'Validation failed', 
+        errors: validationErrors 
       });
     }
     
-    res.json({ 
-      success: true, 
-      message: 'Group deleted successfully' 
-    });
-  } catch (err) {
-    console.error('Error deleting group:', err);
+    // Sanitize group data
+    const sanitizedData = sanitizeGroupData(groupData);
+    
+    // Check if group exists
+    const existingGroup = await pool.query(
+      'SELECT group_id FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+    
+    if (existingGroup.rows.length === 0) {
+      // Apply stricter rate limit for new groups
+      groupCreationLimiter(req, res, async () => {
+        try {
+          await pool.query(
+            'INSERT INTO groups (group_id, data, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
+            [groupId, JSON.stringify(sanitizedData)]
+          );
+          res.json({ success: true, message: 'Group created successfully' });
+        } catch (error) {
+          console.error('Error creating group:', error);
+          res.status(500).json({ 
+            success: false, 
+            message: 'Error creating group' 
+          });
+        }
+      });
+    } else {
+      // Update existing group
+      await pool.query(
+        'UPDATE groups SET data = $1, updated_at = CURRENT_TIMESTAMP WHERE group_id = $2',
+        [JSON.stringify(sanitizedData), groupId]
+      );
+      res.json({ success: true, message: 'Group updated successfully' });
+    }
+  } catch (error) {
+    console.error('Error saving group:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error' 
+      message: 'Error saving group data' 
     });
   }
 });
 
-// Cleanup old groups (optional - run periodically)
-app.post('/api/cleanup', async (req, res) => {
+// DELETE group
+app.delete('/api/groups/:groupId', apiLimiter, async (req, res) => {
   try {
-    // Delete groups older than 6 months
-    const result = await pool.query(
-      `DELETE FROM groups 
-       WHERE updated_at < NOW() - INTERVAL '6 months'
-       RETURNING group_id`
-    );
+    const groupId = req.params.groupId;
+    
+    // Validate groupId format
+    if (!groupId || groupId.length > 255 || !/^[a-zA-Z0-9-_]+$/.test(groupId)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid group ID format' 
+      });
+    }
+    
+    await pool.query('DELETE FROM groups WHERE group_id = $1', [groupId]);
+    res.json({ success: true, message: 'Group deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting group:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error deleting group' 
+    });
+  }
+});
+
+// Contact form endpoint
+app.post('/api/contact', contactLimiter, async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+    
+    // Validate inputs
+    if (!name || !email || !message) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required' 
+      });
+    }
+    
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid email address' 
+      });
+    }
+    
+    if (name.length > 100 || message.length > 2000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Input too long' 
+      });
+    }
+    
+    // Sanitize inputs
+    const sanitizedName = sanitizeString(name, 100);
+    const sanitizedEmail = validator.normalizeEmail(email);
+    const sanitizedMessage = sanitizeString(message, 2000);
+    
+    // Check if email is configured
+    if (!emailTransporter) {
+      console.log('Contact form submission (email not configured):', {
+        name: sanitizedName,
+        email: sanitizedEmail,
+        message: sanitizedMessage
+      });
+      return res.json({ 
+        success: true, 
+        message: 'Message received (email service not configured)' 
+      });
+    }
+    
+    // Send email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: 'anthonyismarketing@gmail.com',
+      replyTo: sanitizedEmail,
+      subject: `ComeGiftIt Contact Form: ${sanitizedName}`,
+      text: `Name: ${sanitizedName}\nEmail: ${sanitizedEmail}\n\nMessage:\n${sanitizedMessage}`,
+      html: `
+        <h2>New Contact Form Submission</h2>
+        <p><strong>Name:</strong> ${sanitizedName}</p>
+        <p><strong>Email:</strong> ${sanitizedEmail}</p>
+        <p><strong>Message:</strong></p>
+        <p>${sanitizedMessage.replace(/\n/g, '<br>')}</p>
+      `
+    };
+    
+    await emailTransporter.sendMail(mailOptions);
     
     res.json({ 
       success: true, 
-      message: `Cleaned up ${result.rowCount} old groups` 
+      message: 'Message sent successfully!' 
     });
-  } catch (err) {
-    console.error('Error cleaning up:', err);
+  } catch (error) {
+    console.error('Error sending contact email:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error' 
+      message: 'Error sending message. Please try again later.' 
     });
   }
 });
 
-// ============================================
-// SERVE FRONTEND
-// ============================================
-
-// Serve static files with security headers
-app.use(express.static(__dirname, {
-  setHeaders: (res, path) => {
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.set('X-Frame-Options', 'DENY');
-    res.set('X-XSS-Protection', '1; mode=block');
+// Cleanup old groups (optional - runs once when server starts)
+async function cleanupOldGroups() {
+  try {
+    // Delete groups older than 2 years
+    const result = await pool.query(
+      "DELETE FROM groups WHERE updated_at < NOW() - INTERVAL '2 years'"
+    );
+    if (result.rowCount > 0) {
+      console.log(`✅ Cleaned up ${result.rowCount} old groups`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up old groups:', error);
   }
-}));
+}
 
-// Serve the main HTML file for any other route
-app.get('*', generalLimiter, (req, res) => {
-  res.sendFile(path.join(__dirname, 'christmas-gift-exchange.html'));
+// Run cleanup on startup
+cleanupOldGroups();
+
+// Redirect old filename to new filename (backward compatibility)
+app.get('/christmas-gift-exchange.html', (req, res) => {
+  res.redirect(301, '/');
 });
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ 
-    success: false, 
-    message: 'Endpoint not found' 
-  });
+app.get('/christmas-gift-exchange-fixed.html', (req, res) => {
+  res.redirect(301, '/');
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    success: false, 
-    message: 'Internal server error' 
-  });
-});
-
-// ============================================
-// START SERVER
-// ============================================
-
+// Start server
 app.listen(PORT, () => {
-  console.log(`🎄 Gift Exchange app running securely on port ${PORT}`);
-  console.log(`✅ Security features enabled:`);
-  console.log(`   - Rate limiting`);
-  console.log(`   - Input validation & sanitization`);
-  console.log(`   - SQL injection protection`);
-  console.log(`   - XSS protection`);
-  console.log(`   - CORS protection`);
-  console.log(`   - Size limits`);
-  console.log(`   - Security headers`);
+  console.log(`\n🎄 ComeGiftIt - Gift Exchange App`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Security features enabled`);
+  console.log(`✅ Data retention: 2 years`);
+  console.log(`✅ Contact form ${emailTransporter ? 'enabled' : 'disabled (configure EMAIL_USER and EMAIL_PASS)'}`);
 });
 
 // Graceful shutdown
