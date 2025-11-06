@@ -4,7 +4,6 @@ const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const validator = require('validator');
-const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,21 +35,6 @@ app.use(express.json({ limit: '1mb' }));
 
 // Serve static files
 app.use(express.static(__dirname));
-
-// Configure email transporter (for contact form)
-let emailTransporter = null;
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  emailTransporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-  console.log('✅ Email service configured');
-} else {
-  console.log('⚠️  Email not configured (set EMAIL_USER and EMAIL_PASS environment variables)');
-}
 
 // Rate limiting - General protection
 const generalLimiter = rateLimit({
@@ -378,7 +362,7 @@ app.delete('/api/groups/:groupId', apiLimiter, async (req, res) => {
   }
 });
 
-// Contact form endpoint
+// Contact form endpoint - LOGS TO CONSOLE ONLY (no email)
 app.post('/api/contact', contactLimiter, async (req, res) => {
   try {
     const { name, email, message } = req.body;
@@ -410,43 +394,20 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
     const sanitizedEmail = validator.normalizeEmail(email);
     const sanitizedMessage = sanitizeString(message, 2000);
     
-    // Check if email is configured
-    if (!emailTransporter) {
-      console.log('Contact form submission (email not configured):', {
-        name: sanitizedName,
-        email: sanitizedEmail,
-        message: sanitizedMessage
-      });
-      return res.json({ 
-        success: true, 
-        message: 'Message received (email service not configured)' 
-      });
-    }
-    
-    // Send email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: 'anthonyismarketing@gmail.com',
-      replyTo: sanitizedEmail,
-      subject: `ComeGiftIt Contact Form: ${sanitizedName}`,
-      text: `Name: ${sanitizedName}\nEmail: ${sanitizedEmail}\n\nMessage:\n${sanitizedMessage}`,
-      html: `
-        <h2>New Contact Form Submission</h2>
-        <p><strong>Name:</strong> ${sanitizedName}</p>
-        <p><strong>Email:</strong> ${sanitizedEmail}</p>
-        <p><strong>Message:</strong></p>
-        <p>${sanitizedMessage.replace(/\n/g, '<br>')}</p>
-      `
-    };
-    
-    await emailTransporter.sendMail(mailOptions);
+    // Log to console (you can check Railway logs)
+    console.log('\n📧 ===== CONTACT FORM SUBMISSION =====');
+    console.log('From:', sanitizedName);
+    console.log('Email:', sanitizedEmail);
+    console.log('Message:', sanitizedMessage);
+    console.log('Time:', new Date().toISOString());
+    console.log('=====================================\n');
     
     res.json({ 
       success: true, 
-      message: 'Message sent successfully!' 
+      message: 'Message received! Thank you for your feedback.' 
     });
   } catch (error) {
-    console.error('Error sending contact email:', error);
+    console.error('Error processing contact form:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Error sending message. Please try again later.' 
@@ -487,7 +448,7 @@ app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`✅ Security features enabled`);
   console.log(`✅ Data retention: 2 years`);
-  console.log(`✅ Contact form ${emailTransporter ? 'enabled' : 'disabled (configure EMAIL_USER and EMAIL_PASS)'}`);
+  console.log(`⚠️  Contact form logs to console (email not configured)`);
 });
 
 // Graceful shutdown
