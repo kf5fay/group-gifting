@@ -957,10 +957,8 @@
                 eventType: eventType,
                 eventDate: eventDate,
                 createdBy: userName,
-                people: {}
+                users: {}
             };
-
-            if (!groupData.users) groupData.users = {};
 
             groupData.users[userName] = { items: [] };
             currentUser = userName;

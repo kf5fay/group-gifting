@@ -237,7 +237,7 @@ function validateGroupData(data) {
       : [];
 
   if (!Array.isArray(wishlist)) {
-    errors.push(`User ${userName}: Wishlist must be an array`);
+    errors.push(`User ${userName}: Wishlist/items must be an array`);
   } else if (wishlist.length > 100) {
     errors.push(`User ${userName}: Too many wishlist items (max 100)`);
   } else {
@@ -247,8 +247,8 @@ function validateGroupData(data) {
         return; // skip blank
       }
 
-      // Accept 'item' or 'name' as the name field
-      const itemName = item.item || item.name || '';
+      // Accept 'description', 'item', or 'name' as the name field
+      const itemName = item.description || item.item || item.name || '';
 
       if (itemName && typeof itemName !== 'string') {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid item name`);
@@ -260,12 +260,21 @@ function validateGroupData(data) {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Notes too long (max 1000 characters)`);
       }
 
+      if (item.details && typeof item.details === 'string' && item.details.length > 1000) {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: Details too long (max 1000 characters)`);
+      }
+
       if (item.price && typeof item.price !== 'string' && typeof item.price !== 'number') {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid price format`);
       }
 
       if (item.link && item.link.length > 0 && !validator.isURL(String(item.link), { require_protocol: false, require_valid_protocol: false })) {
         errors.push(`User ${userName}, Item ${itemIndex + 1}: Invalid URL format`);
+      }
+
+      // Validate claimedBy is an array (not a string)
+      if (item.claimedBy && !Array.isArray(item.claimedBy)) {
+        errors.push(`User ${userName}, Item ${itemIndex + 1}: claimedBy must be an array`);
       }
     });
   }
@@ -280,7 +289,6 @@ function validateGroupData(data) {
 }
 
 // Sanitize entire group data object
-// Sanitize entire group data object
 function sanitizeGroupData(data) {
   // Support both 'users' and 'people' keys for compatibility
   const usersData = data.users || data.people || {};
@@ -289,6 +297,7 @@ function sanitizeGroupData(data) {
     groupName: sanitizeString(data.groupName, 100),
     eventType: data.eventType ? sanitizeString(data.eventType, 50) : '',
     eventDate: data.eventDate || null,
+    createdBy: data.createdBy ? sanitizeString(data.createdBy, 100) : '',
     users: {}
   };
 
@@ -301,19 +310,26 @@ function sanitizeGroupData(data) {
       const sanitizedUserName = sanitizeString(userName, 100);
 
       // Support both 'wishlist' and 'items' arrays for compatibility
-      const wishlist = Array.isArray(user.wishlist)
-        ? user.wishlist
-        : Array.isArray(user.items)
-          ? user.items
+      const itemsList = Array.isArray(user.items)
+        ? user.items
+        : Array.isArray(user.wishlist)
+          ? user.wishlist
           : [];
 
+      // CRITICAL: Save as 'items' to match frontend expectation
       sanitized.users[sanitizedUserName] = {
-        wishlist: wishlist.slice(0, 100).map(item => ({
-          item: sanitizeString(item.item || item.name || '', 500),
-          notes: item.notes ? sanitizeString(item.notes, 1000) : '',
+        items: itemsList.slice(0, 100).map(item => ({
+          // Map frontend field names correctly
+          description: sanitizeString(item.description || item.item || item.name || '', 500),
+          priority: item.priority || 'medium',
           price: item.price ? sanitizeString(String(item.price), 20) : '',
-          link: item.link && item.link.length > 0 ? String(item.link).substring(0, 500) : '',
-          claimedBy: item.claimedBy ? sanitizeString(item.claimedBy, 100) : '',
+          notes: item.notes ? sanitizeString(item.notes, 1000) : '',
+          details: item.details ? sanitizeString(item.details, 1000) : '',
+          // claimedBy MUST be an array, not a string
+          claimedBy: Array.isArray(item.claimedBy)
+            ? item.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100))
+            : [],
+          purchased: Boolean(item.purchased),
           splitWith: Array.isArray(item.splitWith)
             ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
             : []
