@@ -11,6 +11,11 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --primary-color: var(--primary-color);
+            --secondary-color: var(--secondary-color);
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%);
@@ -37,29 +42,6 @@
             to {
                 transform: translateY(100vh);
             }
-        }
-
-        /* Christmas decorations */
-        body::before {
-            content: '🎄';
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            font-size: 60px;
-            opacity: 0.3;
-            z-index: 1;
-            pointer-events: none;
-        }
-
-        body::after {
-            content: '🎁';
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            font-size: 60px;
-            opacity: 0.3;
-            z-index: 1;
-            pointer-events: none;
         }
 
         /* Donation Banner */
@@ -108,7 +90,7 @@
         /* Main Container */
         .container {
             max-width: 1200px;
-            margin: 40px auto;
+            margin: 40px auto 20px auto;
             padding: 0 20px;
         }
 
@@ -124,7 +106,7 @@
             font-size: 32px;
             margin-bottom: 10px;
             text-align: center;
-            color: #c41e3a;
+            color: var(--primary-color);
         }
 
         .tagline {
@@ -156,7 +138,7 @@
 
         input:focus, textarea:focus, select:focus {
             outline: none;
-            border-color: #c41e3a;
+            border-color: var(--primary-color);
         }
 
         textarea {
@@ -165,7 +147,7 @@
         }
 
         button {
-            background: #c41e3a;
+            background: var(--primary-color);
             color: white;
             border: none;
             padding: 14px 30px;
@@ -173,7 +155,7 @@
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.3s, background 0.3s;
+            transition: transform 0.2s, box-shadow 0.3s, background 0.3s, filter 0.3s;
             width: 100%;
             margin-top: 10px;
         }
@@ -181,7 +163,7 @@
         button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 20px rgba(196, 30, 58, 0.4);
-            background: #a01630;
+            filter: brightness(0.85);
         }
 
         button:active {
@@ -227,7 +209,7 @@
             align-items: center;
             margin-bottom: 15px;
             padding-bottom: 10px;
-            border-bottom: 2px solid #165b33;
+            border-bottom: 2px solid var(--secondary-color);
         }
 
         .wishlist-item {
@@ -354,7 +336,7 @@
         }
 
         .modal-header h2 {
-            color: #c41e3a;
+            color: var(--primary-color);
             margin: 0;
         }
 
@@ -371,7 +353,7 @@
         }
 
         .close-btn:hover {
-            color: #c41e3a;
+            color: var(--primary-color);
         }
 
         /* Footer */
@@ -379,7 +361,7 @@
             background: rgba(255,255,255,0.95);
             padding: 30px 20px;
             text-align: center;
-            margin-top: 50px;
+            margin-top: 20px;
             color: #666;
         }
 
@@ -392,13 +374,13 @@
         }
 
         .footer-links a {
-            color: #c41e3a;
+            color: var(--primary-color);
             text-decoration: none;
             font-size: 14px;
         }
 
         .footer-links a:hover {
-            color: #165b33;
+            color: var(--secondary-color);
         }
 
         /* Success/Error Messages */
@@ -600,49 +582,49 @@
             </div>
             
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">How does it work?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">How does it work?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     Create a group, share the link with your family/friends, and everyone adds their wishlist. When someone claims a gift, everyone else can see it's taken (but the recipient can't see who claimed it). No more duplicate gifts!
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">Do I need to create an account?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Do I need to create an account?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     Nope! Just share the link and everyone can join with their name. No passwords, no email verification, no hassle.
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">Can the gift recipient see who claimed their items?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Can the gift recipient see who claimed their items?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     No! That's the magic. When you claim someone's gift, they'll see it's been claimed but NOT who claimed it. The surprise is safe!
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">How long does my group data last?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">How long does my group data last?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     Groups are stored for 2 years. That way, if you didn't get something last year, you can check your old wishlist!
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">What if two people try to claim the same gift?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">What if two people try to claim the same gift?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     The app updates in real-time, so if someone else claims a gift while you're looking, you'll see it immediately. You can also "split" a gift with someone if you want to go in together!
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">Is this free?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Is this free?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     Yes! ComeGiftIt is completely free and ad-free. If you find it helpful, consider buying me a coffee via the donation link at the top. ☕
                 </p>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3 style="color: #c41e3a; font-size: 16px; margin-bottom: 8px;">What about security?</h3>
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">What about security?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
                     The app has enterprise-grade security including rate limiting, input validation, and XSS protection. Your data is safe!
                 </p>
@@ -702,11 +684,76 @@
         let currentUser = null;
         let groupData = null;
         let groupId = null;
+        let currentTheme = 'Christmas'; // Track current theme
+
+        // Theme configurations
+        const themes = {
+            Christmas: {
+                primaryColor: 'var(--primary-color)',
+                secondaryColor: 'var(--secondary-color)',
+                background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%)',
+                fallingItem: '❄',
+                fallingItemName: 'snowflake'
+            },
+            Birthday: {
+                primaryColor: '#9333ea',
+                secondaryColor: '#ec4899',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+                fallingItem: '🎈',
+                fallingItemName: 'balloon'
+            },
+            Hanukkah: {
+                primaryColor: '#2563eb',
+                secondaryColor: '#0284c7',
+                background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%)',
+                fallingItem: '✡',
+                fallingItemName: 'star'
+            },
+            Anniversary: {
+                primaryColor: '#db2777',
+                secondaryColor: '#f59e0b',
+                background: 'linear-gradient(135deg, #be185d 0%, #db2777 50%, #ec4899 100%)',
+                fallingItem: '💕',
+                fallingItemName: 'heart'
+            },
+            Other: {
+                primaryColor: '#059669',
+                secondaryColor: '#8b5cf6',
+                background: 'linear-gradient(135deg, #10b981 0%, #8b5cf6 50%, #f59e0b 100%)',
+                fallingItem: '🎊',
+                fallingItemName: 'confetti'
+            }
+        };
+
+        // Apply theme function
+        function applyTheme(themeName) {
+            const theme = themes[themeName] || themes.Christmas;
+            currentTheme = themeName;
+            
+            // Update CSS variables
+            document.documentElement.style.setProperty('--primary-color', theme.primaryColor);
+            document.documentElement.style.setProperty('--secondary-color', theme.secondaryColor);
+            document.body.style.background = theme.background;
+            
+            // Remove existing falling items
+            document.querySelectorAll('.snowflake').forEach(el => el.remove());
+            
+            // Create new falling items with theme
+            createFallingItems(theme.fallingItem);
+        }
 
         // Initialize on page load
         window.addEventListener('DOMContentLoaded', () => {
             checkDonationBanner();
-            createSnowflakes(); // Add Christmas snowflakes
+            applyTheme('Christmas'); // Apply default theme
+            
+            // Add event listener for holiday selection to change theme
+            const holidaySelect = document.getElementById('holidaySelect');
+            if (holidaySelect) {
+                holidaySelect.addEventListener('change', function() {
+                    applyTheme(this.value);
+                });
+            }
             
             // Check if there's a group ID in the URL
             const hash = window.location.hash.substring(1);
@@ -816,6 +863,9 @@
                 createdBy: '',
                 users: {}
             };
+            
+            // Apply theme based on selected holiday
+            applyTheme(holiday);
 
             // Update URL
             window.location.hash = groupId;
@@ -867,6 +917,11 @@
 
                 if (result.success && result.data) {
                     groupData = result.data;
+                    
+                    // Apply theme based on holiday type
+                    if (groupData.holiday) {
+                        applyTheme(groupData.holiday);
+                    }
 
                     // If user is already logged in, show app
                     if (currentUser && groupData.users[currentUser]) {
@@ -1255,19 +1310,19 @@
             });
         }
 
-        // Snowflake animation
-        function createSnowflakes() {
-            const snowflakeCount = 50;
-            for (let i = 0; i < snowflakeCount; i++) {
-                const snowflake = document.createElement('div');
-                snowflake.className = 'snowflake';
-                snowflake.innerHTML = '❄';
-                snowflake.style.left = Math.random() * 100 + 'vw';
-                snowflake.style.animationDuration = Math.random() * 3 + 2 + 's';
-                snowflake.style.opacity = Math.random();
-                snowflake.style.fontSize = Math.random() * 10 + 10 + 'px';
-                snowflake.style.animationDelay = Math.random() * 5 + 's';
-                document.body.appendChild(snowflake);
+        // Create falling items (snowflakes, balloons, confetti, etc.)
+        function createFallingItems(item = '❄') {
+            const itemCount = 50;
+            for (let i = 0; i < itemCount; i++) {
+                const fallingItem = document.createElement('div');
+                fallingItem.className = 'snowflake';
+                fallingItem.innerHTML = item;
+                fallingItem.style.left = Math.random() * 100 + 'vw';
+                fallingItem.style.animationDuration = Math.random() * 3 + 2 + 's';
+                fallingItem.style.opacity = Math.random();
+                fallingItem.style.fontSize = Math.random() * 10 + 10 + 'px';
+                fallingItem.style.animationDelay = Math.random() * 5 + 's';
+                document.body.appendChild(fallingItem);
             }
         }
     </script>
