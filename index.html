@@ -470,6 +470,8 @@
         }
     </style>
 </head>
+
+
 <body>
     <!-- Donation Banner -->
     <div id="donationBanner" class="donation-banner">
@@ -688,20 +690,21 @@
             
             <div id="contactMessage"></div>
 
-            <form id="contactForm" onsubmit="submitContact(event)">
+            <form id="contactForm" action="https://api.web3forms.com/submit" method="POST">
+                <input type="hidden" name="access_key" value="143c568f-ab1d-49a6-8859-6878e2d9f4cc">
                 <div class="input-group">
-                    <label for="contactName">Your Name</label>
-                    <input type="text" id="contactName" required maxlength="100">
+                    <label for="name">Your Name</label>
+                    <input type="text" id="name" name="name" required maxlength="100">
                 </div>
 
                 <div class="input-group">
-                    <label for="contactEmail">Your Email</label>
-                    <input type="email" id="contactEmail" required maxlength="100">
+                    <label for="email">Your Email</label>
+                    <input type="email" id="email" name="email" required maxlength="100">
                 </div>
 
                 <div class="input-group">
                     <label for="contactMessageText">Message</label>
-                    <textarea id="contactMessageText" required maxlength="2000" placeholder="Found a bug? Have a suggestion? Let us know!"></textarea>
+                    <textarea id="contactMessageText" required maxlength="2000" name="message" placeholder="Found a bug? Have a suggestion? Let us know!"></textarea>
                 </div>
 
                 <button type="submit" id="contactSubmitBtn">Send Message</button>
@@ -1465,45 +1468,6 @@
                 }
             } catch (error) {
                 console.error('Error saving data:', error);
-            }
-        }
-
-        // Contact Form
-        async function submitContact(event) {
-            event.preventDefault();
-            
-            const name = document.getElementById('contactName').value.trim();
-            const email = document.getElementById('contactEmail').value.trim();
-            const message = document.getElementById('contactMessageText').value.trim();
-            
-            const btn = document.getElementById('contactSubmitBtn');
-            const msgDiv = document.getElementById('contactMessage');
-            
-            btn.disabled = true;
-            btn.textContent = 'Sending...';
-            
-            try {
-                const response = await fetch('/api/contact', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ name, email, message })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    msgDiv.innerHTML = '<div class="message message-success">Message sent successfully! We\'ll get back to you soon.</div>';
-                    document.getElementById('contactForm').reset();
-                } else {
-                    msgDiv.innerHTML = `<div class="message message-error">${result.message}</div>`;
-                }
-            } catch (error) {
-                msgDiv.innerHTML = '<div class="message message-error">Error sending message. Please try again later.</div>';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Send Message';
             }
         }
 
