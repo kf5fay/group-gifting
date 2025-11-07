@@ -348,7 +348,7 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
 });
 
 // DELETE group
-app.delete('/api/groups/:groupId', apiLimiter, async (req, res) => {
+app.delete('/api/groups/:groupId', writeLimiter, async (req, res) => {
   try {
     const groupId = req.params.groupId;
     
