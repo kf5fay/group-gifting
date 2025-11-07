@@ -12,8 +12,9 @@
         }
 
         :root {
-            --primary-color: var(--primary-color);
-            --secondary-color: var(--secondary-color);
+            --primary-color: #c41e3a;
+            --secondary-color: #165b33;
+            --button-background: linear-gradient(135deg, #c41e3a 0%, #165b33 100%);
         }
 
         body {
@@ -147,7 +148,7 @@
         }
 
         button {
-            background: var(--primary-color) !important;
+            background: var(--button-background) !important;
             color: white !important;
             border: none;
             padding: 14px 30px;
@@ -664,6 +665,44 @@
         </div>
     </div>
 
+    <!-- Edit Item Modal (for group creators only) -->
+    <div id="editItemModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Wishlist Item</h2>
+                <button class="close-btn" onclick="hideModal('editItemModal')">&times;</button>
+            </div>
+            <div class="input-group">
+                <label for="editItemDescription">Item Description *</label>
+                <input type="text" id="editItemDescription" maxlength="200">
+            </div>
+            <div class="input-group">
+                <label for="editItemPriority">Priority</label>
+                <select id="editItemPriority">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="editItemPrice">Price Range (Optional)</label>
+                <select id="editItemPrice">
+                    <option value="">No preference</option>
+                    <option value="Under $25">Under $25</option>
+                    <option value="$25-$50">$25-$50</option>
+                    <option value="$50-$100">$50-$100</option>
+                    <option value="Over $100">Over $100</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="editItemDetails">Additional Details / Link (Optional)</label>
+                <textarea id="editItemDetails" rows="3" placeholder="Size, color, specific link, etc." maxlength="500"></textarea>
+            </div>
+            <button onclick="saveEditedItem()">Save Changes</button>
+            <button onclick="hideModal('editItemModal')" style="background: #999; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
     <!-- Footer -->
     <div class="footer">
         <div class="footer-links">
@@ -690,39 +729,44 @@
         // Theme configurations
         const themes = {
             Christmas: {
-                primaryColor: 'var(--primary-color)',
-                secondaryColor: 'var(--secondary-color)',
+                primaryColor: '#c41e3a',
+                secondaryColor: '#165b33',
                 background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%)',
                 fallingItem: '❄',
-                fallingItemName: 'snowflake'
+                fallingItemName: 'snowflake',
+                buttonStyle: 'linear-gradient(135deg, #c41e3a 0%, #165b33 100%)'
             },
             Birthday: {
                 primaryColor: '#9333ea',
                 secondaryColor: '#ec4899',
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
                 fallingItem: '🎈',
-                fallingItemName: 'balloon'
+                fallingItemName: 'balloon',
+                buttonStyle: '#9333ea'
             },
             Hanukkah: {
                 primaryColor: '#2563eb',
                 secondaryColor: '#0284c7',
                 background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%)',
                 fallingItem: '✡',
-                fallingItemName: 'star'
+                fallingItemName: 'star',
+                buttonStyle: '#2563eb'
             },
             Anniversary: {
                 primaryColor: '#db2777',
                 secondaryColor: '#f59e0b',
                 background: 'linear-gradient(135deg, #be185d 0%, #db2777 50%, #ec4899 100%)',
                 fallingItem: '💕',
-                fallingItemName: 'heart'
+                fallingItemName: 'heart',
+                buttonStyle: 'linear-gradient(135deg, #db2777 0%, #f59e0b 100%)'
             },
             Other: {
                 primaryColor: '#059669',
                 secondaryColor: '#8b5cf6',
                 background: 'linear-gradient(135deg, #10b981 0%, #8b5cf6 50%, #f59e0b 100%)',
                 fallingItem: '🎊',
-                fallingItemName: 'confetti'
+                fallingItemName: 'confetti',
+                buttonStyle: 'linear-gradient(135deg, #059669 0%, #8b5cf6 100%)'
             }
         };
 
@@ -734,6 +778,7 @@
             // Update CSS variables
             document.documentElement.style.setProperty('--primary-color', theme.primaryColor);
             document.documentElement.style.setProperty('--secondary-color', theme.secondaryColor);
+            document.documentElement.style.setProperty('--button-background', theme.buttonStyle);
             document.body.style.background = theme.background;
             
             // Remove existing falling items
@@ -1032,6 +1077,11 @@
                         if (!isOwnWishlist) {
                             html += '<div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">';
                             
+                            // Edit button for group creator
+                            if (currentUser === groupData.createdBy) {
+                                html += `<button onclick="showEditItemModal('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
+                            }
+                            
                             if (!isPurchased) {
                                 if (claimedByMe) {
                                     html += `<button onclick="unclaimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
@@ -1123,6 +1173,60 @@
                 await saveData();
                 renderWishlists();
             }
+        }
+
+        // Edit Item (Group Creator Only)
+        let editingUser = null;
+        let editingIndex = null;
+
+        function showEditItemModal(username, itemIndex) {
+            // Check if current user is the group creator
+            if (currentUser !== groupData.createdBy) {
+                alert('Only the group creator can edit items');
+                return;
+            }
+
+            editingUser = username;
+            editingIndex = itemIndex;
+            
+            const item = groupData.users[username].items[itemIndex];
+            
+            // Populate the edit form
+            document.getElementById('editItemDescription').value = item.description || '';
+            document.getElementById('editItemPriority').value = item.priority || 'medium';
+            document.getElementById('editItemPrice').value = item.price || '';
+            document.getElementById('editItemDetails').value = item.details || '';
+            
+            showModal('editItemModal');
+        }
+
+        async function saveEditedItem() {
+            if (!editingUser || editingIndex === null) return;
+            
+            const description = document.getElementById('editItemDescription').value.trim();
+            const priority = document.getElementById('editItemPriority').value;
+            const price = document.getElementById('editItemPrice').value;
+            const details = document.getElementById('editItemDetails').value.trim();
+            
+            if (!description) {
+                alert('Please enter an item description');
+                return;
+            }
+            
+            // Update the item
+            const item = groupData.users[editingUser].items[editingIndex];
+            item.description = description;
+            item.priority = priority;
+            item.price = price;
+            item.details = details;
+            
+            await saveData();
+            renderWishlists();
+            hideModal('editItemModal');
+            
+            // Reset editing state
+            editingUser = null;
+            editingIndex = null;
         }
 
         // Claim Item
