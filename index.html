@@ -1046,8 +1046,9 @@
                         if (item.priority) {
                             itemClass += ` priority-${item.priority}`;
                         }
-                        if (isClaimed) itemClass += ' claimed';
-                        if (isPurchased) itemClass += ' purchased';
+                        // Only show claimed status to others, not to the gift recipient
+                        if (!isOwnWishlist && isClaimed) itemClass += ' claimed';
+                        if (!isOwnWishlist && isPurchased) itemClass += ' purchased';
 
                         html += `<div class="${itemClass}">`;
                         html += `<div class="item-description">${escapeHtml(item.description)}</div>`;
@@ -1059,13 +1060,16 @@
                         if (item.price) {
                             html += `<span class="badge" style="background: #e5ffe5; color: #27ae60;">${escapeHtml(item.price)}</span>`;
                         }
-                        if (isPurchased) {
-                            html += `<span class="badge badge-purchased">✓ PURCHASED</span>`;
-                        } else if (isClaimed) {
-                            html += `<span class="badge badge-claimed">CLAIMED</span>`;
-                        }
-                        if (item.splitWith && item.splitWith.length > 0) {
-                            html += `<span class="badge badge-split">SPLIT WITH ${item.splitWith.length}</span>`;
+                        // Only show claimed/purchased/split status to others, not to the gift recipient
+                        if (!isOwnWishlist) {
+                            if (isPurchased) {
+                                html += `<span class="badge badge-purchased">✓ PURCHASED</span>`;
+                            } else if (isClaimed) {
+                                html += `<span class="badge badge-claimed">CLAIMED</span>`;
+                            }
+                            if (item.splitWith && item.splitWith.length > 0) {
+                                html += `<span class="badge badge-split">SPLIT WITH ${item.splitWith.length}</span>`;
+                            }
                         }
 
                         // Details with clickable links
