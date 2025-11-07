@@ -39,17 +39,26 @@ app.use(express.static(__dirname));
 // Rate limiting - General protection
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: 1000, // Increased significantly for polling
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Stricter rate limit for API operations
-const apiLimiter = rateLimit({
+// Lenient rate limit for GET requests (read operations)
+const readLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 30,
-  message: { success: false, message: 'Too many API requests, please slow down.' }
+  max: 100, // Allow 100 GET requests per minute (polling every 5s = 12/min)
+  message: { success: false, message: 'Too many read requests, please slow down.' },
+  skip: (req) => req.method !== 'GET' // Only apply to GET requests
+});
+
+// Stricter rate limit for write operations (POST, PUT)
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 write operations per minute
+  message: { success: false, message: 'Too many write requests, please slow down.' },
+  skip: (req) => req.method === 'GET' // Skip GET requests
 });
 
 // Very strict limit for group creation
@@ -240,7 +249,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // GET group data
-app.get('/api/groups/:groupId', apiLimiter, async (req, res) => {
+app.get('/api/groups/:groupId', readLimiter, async (req, res) => {
   try {
     const groupId = req.params.groupId;
     
@@ -272,7 +281,7 @@ app.get('/api/groups/:groupId', apiLimiter, async (req, res) => {
 });
 
 // POST/UPDATE group data
-app.post('/api/groups/:groupId', apiLimiter, async (req, res) => {
+app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
   try {
     const groupId = req.params.groupId;
     const groupData = req.body;

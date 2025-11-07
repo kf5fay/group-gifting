@@ -816,12 +816,12 @@
                 currentUser = savedUsername;
             }
 
-            // Poll for updates every 5 seconds
+            // Poll for updates every 10 seconds
             setInterval(() => {
                 if (groupId && currentUser) {
                     loadGroup(true); // Silent reload
                 }
-            }, 5000);
+            }, 10000);
         });
 
         // Donation Banner Logic
