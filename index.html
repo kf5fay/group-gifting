@@ -470,8 +470,6 @@
         }
     </style>
 </head>
-
-
 <body>
     <!-- Donation Banner -->
     <div id="donationBanner" class="donation-banner">
@@ -690,21 +688,20 @@
             
             <div id="contactMessage"></div>
 
-            <form id="contactForm" action="https://api.web3forms.com/submit" method="POST">
-                <input type="hidden" name="access_key" value="143c568f-ab1d-49a6-8859-6878e2d9f4cc">
+            <form id="contactForm" onsubmit="submitContact(event)">
                 <div class="input-group">
-                    <label for="name">Your Name</label>
-                    <input type="text" id="name" name="name" required maxlength="100">
+                    <label for="contactName">Your Name</label>
+                    <input type="text" id="contactName" required maxlength="100">
                 </div>
 
                 <div class="input-group">
-                    <label for="email">Your Email</label>
-                    <input type="email" id="email" name="email" required maxlength="100">
+                    <label for="contactEmail">Your Email</label>
+                    <input type="email" id="contactEmail" required maxlength="100">
                 </div>
 
                 <div class="input-group">
                     <label for="contactMessageText">Message</label>
-                    <textarea id="contactMessageText" required maxlength="2000" name="message" placeholder="Found a bug? Have a suggestion? Let us know!"></textarea>
+                    <textarea id="contactMessageText" required maxlength="2000" placeholder="Found a bug? Have a suggestion? Let us know!"></textarea>
                 </div>
 
                 <button type="submit" id="contactSubmitBtn">Send Message</button>
@@ -1156,7 +1153,12 @@
                 let html = `
                     <div class="wishlist-header">
                         <h3>${username}</h3>
-                        <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
+                            ${currentUser === groupData.createdBy && username !== currentUser ? 
+                                `<button onclick="deleteUser('${username}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>` 
+                                : ''}
+                        </div>
                     </div>
                 `;
 
@@ -1294,6 +1296,43 @@
         async function deleteItem(index) {
             if (confirm('Are you sure you want to delete this item?')) {
                 groupData.users[currentUser].items.splice(index, 1);
+                await saveData();
+                renderWishlists();
+            }
+        }
+
+        // Delete User (Group Creator Only)
+        async function deleteUser(username) {
+            // Check if current user is the group creator
+            if (currentUser !== groupData.createdBy) {
+                alert('Only the group creator can remove users');
+                return;
+            }
+
+            // Prevent creator from deleting themselves
+            if (username === currentUser) {
+                alert('You cannot remove yourself from the group');
+                return;
+            }
+
+            if (confirm(`Are you sure you want to remove ${username} from the group? This will delete their wishlist and all associated data.`)) {
+                // Remove the user's wishlist
+                delete groupData.users[username];
+                
+                // Remove this user from any claims they made on other users' items
+                for (const [otherUsername, userData] of Object.entries(groupData.users)) {
+                    if (userData.items) {
+                        userData.items.forEach(item => {
+                            if (item.claimedBy && Array.isArray(item.claimedBy)) {
+                                item.claimedBy = item.claimedBy.filter(name => name !== username);
+                            }
+                            if (item.splitWith && Array.isArray(item.splitWith)) {
+                                item.splitWith = item.splitWith.filter(name => name !== username);
+                            }
+                        });
+                    }
+                }
+                
                 await saveData();
                 renderWishlists();
             }
@@ -1468,6 +1507,45 @@
                 }
             } catch (error) {
                 console.error('Error saving data:', error);
+            }
+        }
+
+        // Contact Form
+        async function submitContact(event) {
+            event.preventDefault();
+            
+            const name = document.getElementById('contactName').value.trim();
+            const email = document.getElementById('contactEmail').value.trim();
+            const message = document.getElementById('contactMessageText').value.trim();
+            
+            const btn = document.getElementById('contactSubmitBtn');
+            const msgDiv = document.getElementById('contactMessage');
+            
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            
+            try {
+                const response = await fetch('/api/contact', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name, email, message })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    msgDiv.innerHTML = '<div class="message message-success">Message sent successfully! We\'ll get back to you soon.</div>';
+                    document.getElementById('contactForm').reset();
+                } else {
+                    msgDiv.innerHTML = `<div class="message message-error">${result.message}</div>`;
+                }
+            } catch (error) {
+                msgDiv.innerHTML = '<div class="message message-error">Error sending message. Please try again later.</div>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send Message';
             }
         }
 
