@@ -220,6 +220,7 @@
             border-radius: 10px;
             margin-bottom: 10px;
             border-left: 4px solid #ccc;
+            position: relative;
         }
 
         .wishlist-item.priority-high {
@@ -235,7 +236,6 @@
         }
 
         .wishlist-item.claimed {
-            opacity: 0.7;
             background: #e8f5e9;
         }
 
@@ -245,10 +245,39 @@
             text-decoration: line-through;
         }
 
+        /* Delete button styling */
+        .delete-item-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #f5576c !important;
+            color: white !important;
+            border: none;
+            width: 24px !important;
+            height: 24px;
+            border-radius: 50%;
+            padding: 0 !important;
+            margin: 0 !important;
+            font-size: 14px;
+            line-height: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+
+        .delete-item-btn:hover {
+            background: #d9304f !important;
+            transform: scale(1.1);
+        }
+
         .item-description {
             font-weight: 600;
             color: #333;
             margin-bottom: 5px;
+            padding-right: 30px;
         }
 
         .item-meta {
@@ -295,6 +324,12 @@
         .badge-purchased {
             background: #f0f0f0;
             color: #888;
+        }
+
+        /* Fix button visibility in claimed items */
+        .wishlist-item.claimed button,
+        .wishlist-item.claimed .delete-item-btn {
+            opacity: 1 !important;
         }
 
         /* Modal */
@@ -542,7 +577,7 @@
 
             <div id="wishlistsContainer" class="wishlists-grid"></div>
 
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+            <div id="resetGroupSection" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0; display: none;">
                 <button onclick="resetGroup()" class="btn-danger">🗑️ Reset Group (Creator Only)</button>
             </div>
         </div>
@@ -770,6 +805,47 @@
             }
         };
 
+        // Calculate next occurrence of Christmas
+        function getNextChristmas() {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            let christmas = new Date(currentYear, 11, 25); // Month is 0-indexed, so 11 = December
+            
+            // If Christmas has passed this year, use next year
+            if (now > christmas) {
+                christmas = new Date(currentYear + 1, 11, 25);
+            }
+            
+            // Format as YYYY-MM-DD for input[type="date"]
+            return christmas.toISOString().split('T')[0];
+        }
+
+        // Calculate next occurrence of Hanukkah (approximate - Hanukkah dates vary)
+        function getNextHanukkah() {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            
+            // Hanukkah dates for upcoming years (1st day of Hanukkah)
+            // These are approximate - Hanukkah dates vary based on Hebrew calendar
+            const hanukkahDates = {
+                2024: new Date(2024, 11, 26), // Dec 26, 2024
+                2025: new Date(2025, 11, 15), // Dec 15, 2025
+                2026: new Date(2026, 11, 5),  // Dec 5, 2026
+                2027: new Date(2027, 11, 25), // Dec 25, 2027
+                2028: new Date(2028, 11, 13), // Dec 13, 2028
+            };
+            
+            // Find the next Hanukkah
+            for (let year = currentYear; year <= currentYear + 5; year++) {
+                if (hanukkahDates[year] && now < hanukkahDates[year]) {
+                    return hanukkahDates[year].toISOString().split('T')[0];
+                }
+            }
+            
+            // Fallback to December 15 if we don't have the date
+            return new Date(currentYear + 1, 11, 15).toISOString().split('T')[0];
+        }
+
         // Apply theme function
         function applyTheme(themeName) {
             const theme = themes[themeName] || themes.Christmas;
@@ -793,12 +869,26 @@
             checkDonationBanner();
             applyTheme('Christmas'); // Apply default theme
             
-            // Add event listener for holiday selection to change theme
+            // Add event listener for holiday selection to change theme and auto-fill dates
             const holidaySelect = document.getElementById('holidaySelect');
-            if (holidaySelect) {
+            const eventDateInput = document.getElementById('eventDate');
+            
+            if (holidaySelect && eventDateInput) {
                 holidaySelect.addEventListener('change', function() {
                     applyTheme(this.value);
+                    
+                    // Auto-fill date for Christmas and Hanukkah
+                    if (this.value === 'Christmas') {
+                        eventDateInput.value = getNextChristmas();
+                    } else if (this.value === 'Hanukkah') {
+                        eventDateInput.value = getNextHanukkah();
+                    }
                 });
+                
+                // Set initial date for Christmas (default selection)
+                if (holidaySelect.value === 'Christmas') {
+                    eventDateInput.value = getNextChristmas();
+                }
             }
             
             // Check if there's a group ID in the URL
@@ -1010,6 +1100,14 @@
             // Share link
             document.getElementById('shareLink').value = window.location.href;
 
+            // Show/hide reset button based on creator status
+            const resetSection = document.getElementById('resetGroupSection');
+            if (currentUser === groupData.createdBy) {
+                resetSection.style.display = 'block';
+            } else {
+                resetSection.style.display = 'none';
+            }
+
             // Render wishlists
             renderWishlists();
 
@@ -1051,6 +1149,12 @@
                         if (!isOwnWishlist && isPurchased) itemClass += ' purchased';
 
                         html += `<div class="${itemClass}">`;
+                        
+                        // Delete button for own items (X in top right)
+                        if (isOwnWishlist) {
+                            html += `<button onclick="deleteItem(${index})" class="delete-item-btn" title="Delete this item">×</button>`;
+                        }
+                        
                         html += `<div class="item-description">${escapeHtml(item.description)}</div>`;
 
                         // Badges
@@ -1112,18 +1216,6 @@
 
                         html += '</div>';
                     });
-                }
-
-                // Delete button for own items
-                if (isOwnWishlist && user.items.length > 0) {
-                    html += '<div style="margin-top: 15px;">';
-                    user.items.forEach((item, index) => {
-                        html += `<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">`;
-                        html += `<span style="flex: 1; font-size: 13px;">${escapeHtml(item.description)}</span>`;
-                        html += `<button onclick="deleteItem(${index})" class="btn-danger" style="font-size: 11px; padding: 5px 10px; width: auto; margin: 0;">Delete</button>`;
-                        html += `</div>`;
-                    });
-                    html += '</div>';
                 }
 
                 card.innerHTML = html;
