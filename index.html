@@ -332,6 +332,12 @@
             opacity: 1 !important;
         }
 
+        /* See more button hover effect */
+        button[onclick^="toggleWishlist"]:hover {
+            background: var(--primary-color) !important;
+            color: white !important;
+        }
+
         /* Modal */
         .modal {
             display: none;
@@ -630,7 +636,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">How does it work?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    Create a group, share the link with your family/friends, and everyone adds their wishlist. When someone claims a gift, everyone else can see it's taken (but the recipient can't see that it was claimed or who claimed it). No more duplicate gifts!
+                    Create a group, share the link with your family/friends, and everyone adds their wishlist. When someone claims a gift, everyone else can see it's taken (but the recipient can't see who claimed it). No more duplicate gifts!
                 </p>
             </div>
 
@@ -644,7 +650,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Can the gift recipient see who claimed their items?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    No! That's the magic. When you claim someone's gift, they wont see anything at all. The surprise is safe!
+                    No! That's the magic. When you claim someone's gift, they'll see it's been claimed but NOT who claimed it. The surprise is safe!
                 </p>
             </div>
 
@@ -769,6 +775,7 @@
         let groupData = null;
         let groupId = null;
         let currentTheme = 'Christmas'; // Track current theme
+        let expandedWishlists = {}; // Track which wishlists are expanded
 
         // Theme configurations
         const themes = {
@@ -1139,6 +1146,22 @@
             showScreen('app');
         }
 
+        // Toggle wishlist expansion
+        function toggleWishlist(username) {
+            // Collapse all others
+            for (const key in expandedWishlists) {
+                if (key !== username) {
+                    expandedWishlists[key] = false;
+                }
+            }
+            
+            // Toggle the clicked one
+            expandedWishlists[username] = !expandedWishlists[username];
+            
+            // Re-render
+            renderWishlists();
+        }
+
         // Render Wishlists
         function renderWishlists() {
             const container = document.getElementById('wishlistsContainer');
@@ -1165,7 +1188,13 @@
                 if (user.items.length === 0) {
                     html += '<p style="color: #999; font-style: italic; text-align: center; padding: 20px;">No items yet</p>';
                 } else {
-                    user.items.forEach((item, index) => {
+                    // Determine how many items to show
+                    const ITEMS_TO_SHOW = 4; // Show first 4 items when collapsed
+                    const isExpanded = expandedWishlists[username] || false;
+                    const itemsToDisplay = isExpanded ? user.items : user.items.slice(0, ITEMS_TO_SHOW);
+                    const hasMore = user.items.length > ITEMS_TO_SHOW;
+                    
+                    itemsToDisplay.forEach((item, index) => {
                         const isClaimed = item.claimedBy && item.claimedBy.length > 0;
                         const claimedByMe = isClaimed && item.claimedBy.includes(currentUser);
                         const isPurchased = item.purchased;
@@ -1246,6 +1275,27 @@
 
                         html += '</div>';
                     });
+                    
+                    // Add "See more" / "Show less" button if there are more items
+                    if (hasMore) {
+                        html += `
+                            <div style="text-align: center; margin-top: 15px;">
+                                <button onclick="toggleWishlist('${username}')" style="
+                                    background: transparent !important;
+                                    color: var(--primary-color) !important;
+                                    border: 2px solid var(--primary-color);
+                                    font-size: 13px;
+                                    padding: 8px 20px;
+                                    width: auto;
+                                    margin: 0;
+                                    font-weight: 600;
+                                    box-shadow: none;
+                                ">
+                                    ${isExpanded ? '▲ Show Less' : `▼ See More (${user.items.length - ITEMS_TO_SHOW} more)`}
+                                </button>
+                            </div>
+                        `;
+                    }
                 }
 
                 card.innerHTML = html;
@@ -1281,6 +1331,9 @@
             }
 
             groupData.users[currentUser].items.push(item);
+
+            // Auto-expand user's own wishlist to see the new item
+            expandedWishlists[currentUser] = true;
 
             // Clear inputs
             document.getElementById('wishlistItem').value = '';
