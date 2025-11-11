@@ -1240,23 +1240,29 @@
                             html += `<div class="item-meta">📝 ${linkifyText(item.details)}</div>`;
                         }
 
-                        // Buttons (only show for others' wishlists)
-                        if (!isOwnWishlist) {
+                        // Edit button section
+                        // Show edit button if: 1) it's your own item, OR 2) you're the group creator
+                        const canEdit = isOwnWishlist || (currentUser === groupData.createdBy);
+                        
+                        if (canEdit || !isOwnWishlist) {
                             html += '<div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">';
                             
-                            // Edit button for group creator
-                            if (currentUser === groupData.createdBy) {
-                                html += `<button onclick="showEditItemModal('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
+                            // Edit button - show for own items OR if you're the creator
+                            if (canEdit) {
+                                html += `<button onclick="showEditItemModal('${username}', ${index})" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
                             }
                             
-                            if (!isPurchased) {
-                                if (claimedByMe) {
-                                    html += `<button onclick="unclaimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
-                                    html += `<button onclick="markPurchased('${username}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
-                                } else if (!isClaimed) {
-                                    html += `<button onclick="claimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
-                                } else {
-                                    html += `<button onclick="splitGift('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
+                            // Gift coordination buttons (only show for others' wishlists)
+                            if (!isOwnWishlist) {
+                                if (!isPurchased) {
+                                    if (claimedByMe) {
+                                        html += `<button onclick="unclaimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
+                                        html += `<button onclick="markPurchased('${username}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
+                                    } else if (!isClaimed) {
+                                        html += `<button onclick="claimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
+                                    } else {
+                                        html += `<button onclick="splitGift('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
+                                    }
                                 }
                             }
 
@@ -1391,14 +1397,16 @@
             }
         }
 
-        // Edit Item (Group Creator Only)
+        // Edit Item (Users can edit their own items, Group Creator can edit all items)
         let editingUser = null;
         let editingIndex = null;
 
         function showEditItemModal(username, itemIndex) {
-            // Check if current user is the group creator
-            if (currentUser !== groupData.createdBy) {
-                alert('Only the group creator can edit items');
+            // Check if current user can edit this item (own item OR is group creator)
+            const canEdit = (username === currentUser) || (currentUser === groupData.createdBy);
+            
+            if (!canEdit) {
+                alert('You can only edit your own items');
                 return;
             }
 
