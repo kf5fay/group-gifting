@@ -1,7 +1,3 @@
-# 🎄 Holiday Gift Exchange App
-
-A festive web app for organizing gift exchanges with family and friends. Each group gets a unique shareable link, and members can add wishlists, claim gifts, and coordinate purchases.
-
 # 🎄 ComeGiftIt - Holiday Gift Exchange App
 
 A festive web app for organizing gift exchanges with family and friends. Each group gets a unique shareable link, and members can add wishlists, claim gifts, and coordinate purchases—all while preserving the surprise of who's getting what!
