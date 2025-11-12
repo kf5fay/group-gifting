@@ -1231,7 +1231,9 @@
                                 html += `<span class="badge badge-claimed">CLAIMED</span>`;
                             }
                             if (item.splitWith && item.splitWith.length > 0) {
-                                html += `<span class="badge badge-split">SPLIT WITH ${item.splitWith.length}</span>`;
+                                // Show total number of people splitting (claimedBy includes everyone)
+                                const totalSplitters = item.claimedBy ? item.claimedBy.length : 1;
+                                html += `<span class="badge badge-split">SPLIT ${totalSplitters} WAYS</span>`;
                             }
                         }
 
