@@ -1077,16 +1077,10 @@
             const groupName = document.getElementById('groupNameInput').value.trim();
             const holiday = document.getElementById('holidaySelect').value;
             const eventDate = document.getElementById('eventDate').value;
-            const creatorEmail = document.getElementById('creatorEmail').value.trim();
+            
 
             if (!groupName) {
                 alert('Please enter a group name');
-                return;
-            }
-
-            // Validate email if provided (optional field)
-            if (creatorEmail && !isValidEmail(creatorEmail)) {
-                alert('Please enter a valid email address or leave it blank');
                 return;
             }
 
@@ -1099,7 +1093,6 @@
                 holiday: holiday,
                 eventDate: eventDate,
                 createdBy: '',
-                creatorEmail: creatorEmail || '', // Store email if provided
                 users: {}
             };
             
