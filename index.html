@@ -1637,12 +1637,6 @@
             window.location.href = `mailto:?subject=${subject}&body=${body}`;
         }
 
-        // Email validation helper
-        function isValidEmail(email) {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            return emailRegex.test(email);
-        }
-
         // Save Data
         async function saveData() {
             try {
