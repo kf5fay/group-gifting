@@ -1241,12 +1241,17 @@
             for (const [username, user] of sortedUsers) {
                 const isOwnWishlist = username === currentUser;
                 
+                // Check if current user has purchased any items from this person's wishlist
+                const hasPurchasedFromUser = !isOwnWishlist && user.items.some(item => 
+                    item.purchased && item.claimedBy && item.claimedBy.includes(currentUser)
+                );
+                
                 const card = document.createElement('div');
                 card.className = 'wishlist-card';
 
                 let html = `
                     <div class="wishlist-header">
-                        <h3>${username}</h3>
+                        <h3>${username} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
                             ${currentUser === groupData.createdBy && username !== currentUser ? 
@@ -1260,10 +1265,20 @@
                     html += '<p style="color: #999; font-style: italic; text-align: center; padding: 20px;">No items yet</p>';
                 } else {
                     // Determine how many items to show
-                    const ITEMS_TO_SHOW = 4; // Show first 4 items when collapsed
-                    const isExpanded = expandedWishlists[username] || false;
-                    const itemsToDisplay = isExpanded ? user.items : user.items.slice(0, ITEMS_TO_SHOW);
-                    const hasMore = user.items.length > ITEMS_TO_SHOW;
+                    const isExpanded = expandedWishlists[username] !== undefined ? expandedWishlists[username] : true; // Default to expanded
+                    
+                    // If collapsed, show 0 items. If expanded (or default for own wishlist), show all items
+                    let itemsToDisplay;
+                    let showExpandButton = false;
+                    
+                    if (isExpanded || isOwnWishlist) {
+                        // Show all items when expanded or viewing own wishlist
+                        itemsToDisplay = user.items;
+                    } else {
+                        // Show no items when collapsed (after purchase)
+                        itemsToDisplay = [];
+                        showExpandButton = true;
+                    }
                     
                     itemsToDisplay.forEach((item, index) => {
                         const isClaimed = item.claimedBy && item.claimedBy.length > 0;
@@ -1355,8 +1370,8 @@
                         html += '</div>';
                     });
                     
-                    // Add "See more" / "Show less" button if there are more items
-                    if (hasMore) {
+                    // Add "See more" / "Hide items" button (but not for own wishlist)
+                    if (!isOwnWishlist && (showExpandButton || isExpanded)) {
                         html += `
                             <div style="text-align: center; margin-top: 15px;">
                                 <button onclick="toggleWishlist('${username}')" style="
@@ -1370,7 +1385,7 @@
                                     font-weight: 600;
                                     box-shadow: none;
                                 ">
-                                    ${isExpanded ? '▲ Show Less' : `▼ See More (${user.items.length - ITEMS_TO_SHOW} more)`}
+                                    ${isExpanded ? '▲ Hide Items' : `▼ Show Items (${user.items.length})`}
                                 </button>
                             </div>
                         `;
@@ -1579,6 +1594,10 @@
         async function markPurchased(username, itemIndex) {
             if (confirm('Mark this gift as purchased?')) {
                 groupData.users[username].items[itemIndex].purchased = true;
+                
+                // Collapse this person's wishlist after marking as purchased
+                expandedWishlists[username] = false;
+                
                 await saveData();
                 renderWishlists();
             }
