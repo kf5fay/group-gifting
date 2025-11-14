@@ -1231,7 +1231,14 @@
             const container = document.getElementById('wishlistsContainer');
             container.innerHTML = '';
 
-            for (const [username, user] of Object.entries(groupData.users)) {
+            // Sort users so current user appears first
+            const sortedUsers = Object.entries(groupData.users).sort(([usernameA], [usernameB]) => {
+                if (usernameA === currentUser) return -1;
+                if (usernameB === currentUser) return 1;
+                return 0;
+            });
+
+            for (const [username, user] of sortedUsers) {
                 const isOwnWishlist = username === currentUser;
                 
                 const card = document.createElement('div');
