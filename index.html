@@ -1710,11 +1710,15 @@
             if (confirm('Mark this gift as purchased?')) {
                 groupData.users[username].items[itemIndex].purchased = true;
                 
-                // Collapse this person's wishlist after marking as purchased
-                expandedWishlists[username] = false;
-                
                 await saveData();
-                renderWishlists();
+                renderWishlists(); // Show the purchased state first
+                
+                // Wait 1.5 seconds so user can see the item marked as purchased,
+                // then collapse the wishlist
+                setTimeout(() => {
+                    expandedWishlists[username] = false;
+                    renderWishlists();
+                }, 1500);
             }
         }
 
