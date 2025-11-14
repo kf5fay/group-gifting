@@ -616,6 +616,14 @@
                 </div>
             </div>
 
+            <!-- Thank You Button (appears after event date) -->
+            <div id="thankYouSection" style="display: none; margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 10px; text-align: center;">
+                <p style="color: white; font-weight: 600; margin-bottom: 10px;">🎉 The event has passed!</p>
+                <button onclick="showThankYouModal()" style="background: white !important; color: #f5576c !important; width: auto; margin: 0; padding: 12px 24px; font-weight: 700;">
+                    💝 Who Do I Thank?
+                </button>
+            </div>
+
             <div class="input-group">
                 <label>Logged in as: <strong id="currentUsername"></strong></label>
             </div>
@@ -813,6 +821,19 @@
             </div>
             <button onclick="saveEditedItem()">Save Changes</button>
             <button onclick="hideModal('editItemModal')" style="background: #999; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Thank You Modal -->
+    <div id="thankYouModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>💝 Who Do I Thank?</h2>
+                <button class="close-btn" onclick="hideModal('thankYouModal')">&times;</button>
+            </div>
+            <div id="thankYouContent">
+                <!-- Content will be populated by JavaScript -->
+            </div>
         </div>
     </div>
 
@@ -1189,6 +1210,10 @@
                 eventInfo += ` - ${date.toLocaleDateString()}`;
                 if (daysUntil > 0) {
                     eventInfo += ` (${daysUntil} days away)`;
+                } else if (daysUntil === 0) {
+                    eventInfo += ` (Today!)`;
+                } else {
+                    eventInfo += ` (${Math.abs(daysUntil)} days ago)`;
                 }
             }
             document.getElementById('appEventInfo').textContent = eventInfo;
@@ -1204,10 +1229,100 @@
                 resetSection.style.display = 'none';
             }
 
+            // Show/hide "Who Do I Thank?" button if event date has passed
+            checkAndShowThankYouButton();
+
             // Render wishlists
             renderWishlists();
 
             showScreen('app');
+        }
+
+        // Check if event date has passed and show thank you button
+        function checkAndShowThankYouButton() {
+            const thankYouSection = document.getElementById('thankYouSection');
+            
+            if (!groupData.eventDate) {
+                thankYouSection.style.display = 'none';
+                return;
+            }
+
+            const eventDate = new Date(groupData.eventDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Reset to start of day for comparison
+            
+            // Show button if event date has passed
+            if (today > eventDate) {
+                thankYouSection.style.display = 'block';
+            } else {
+                thankYouSection.style.display = 'none';
+            }
+        }
+
+        // Show thank you modal with gift givers
+        function showThankYouModal() {
+            const content = document.getElementById('thankYouContent');
+            
+            if (!groupData.users[currentUser]) {
+                content.innerHTML = '<p style="text-align: center; color: #666;">No wishlist found.</p>';
+                showModal('thankYouModal');
+                return;
+            }
+
+            const myItems = groupData.users[currentUser].items;
+            const purchasedItems = myItems.filter(item => item.purchased && item.claimedBy && item.claimedBy.length > 0);
+
+            if (purchasedItems.length === 0) {
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <p style="color: #666; margin-bottom: 15px;">No purchased gifts found yet!</p>
+                        <p style="font-size: 14px; color: #999;">Items will appear here once they're marked as purchased.</p>
+                    </div>
+                `;
+            } else {
+                let html = `
+                    <p style="margin-bottom: 20px; color: #555;">
+                        Here's who bought gifts for you - time to send those thank you cards! 💌
+                    </p>
+                `;
+
+                purchasedItems.forEach(item => {
+                    const buyers = item.claimedBy.join(', ');
+                    const isSplit = item.claimedBy.length > 1;
+                    
+                    html += `
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #2ecc71;">
+                            <div style="font-weight: 600; color: #333; margin-bottom: 5px;">
+                                ${escapeHtml(item.description)}
+                            </div>
+                            <div style="font-size: 14px; color: #2ecc71; margin-top: 5px;">
+                                💝 ${isSplit ? 'Split gift from' : 'Gift from'}: <strong>${escapeHtml(buyers)}</strong>
+                            </div>
+                            ${item.price ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">Price range: ${escapeHtml(item.price)}</div>` : ''}
+                        </div>
+                    `;
+                });
+
+                // Summary
+                const uniqueBuyers = new Set();
+                purchasedItems.forEach(item => {
+                    if (item.claimedBy) {
+                        item.claimedBy.forEach(buyer => uniqueBuyers.add(buyer));
+                    }
+                });
+
+                html += `
+                    <div style="margin-top: 25px; padding: 15px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 10px; text-align: center;">
+                        <p style="color: white; font-weight: 600; margin: 0;">
+                            📝 Send thank you cards to: ${Array.from(uniqueBuyers).join(', ')}
+                        </p>
+                    </div>
+                `;
+
+                content.innerHTML = html;
+            }
+
+            showModal('thankYouModal');
         }
 
         // Toggle wishlist expansion

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Thank You Feature - Date Logic Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .test { margin: 20px 0; padding: 15px; border: 2px solid #ccc; border-radius: 10px; }
+        .pass { border-color: #2ecc71; background: #e8f5e9; }
+        .fail { border-color: #f5576c; background: #ffe5e5; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Thank You Feature - Date Logic Test</h1>
+    
+    <div id="tests"></div>
+    
+    <script>
+        function testDateLogic(eventDateStr, description) {
+            const eventDate = new Date(eventDateStr);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const shouldShow = today > eventDate;
+            
+            return {
+                description,
+                eventDate: eventDateStr,
+                today: today.toDateString(),
+                shouldShow,
+                result: shouldShow ? 'SHOW Button' : 'HIDE Button'
+            };
+        }
+        
+        const tests = [
+            testDateLogic('2024-12-25', 'Past Event (Last Christmas)'),
+            testDateLogic('2025-11-14', 'Today'),
+            testDateLogic('2025-11-15', 'Tomorrow'),
+            testDateLogic('2025-12-25', 'Future Event (Next Christmas)'),
+            testDateLogic('2025-11-01', 'Two Weeks Ago')
+        ];
+        
+        const container = document.getElementById('tests');
+        
+        tests.forEach(test => {
+            const div = document.createElement('div');
+            div.className = `test ${test.shouldShow ? 'pass' : 'fail'}`;
+            div.innerHTML = `
+                <h3>${test.description}</h3>
+                <p><strong>Event Date:</strong> ${test.eventDate}</p>
+                <p><strong>Today:</strong> ${test.today}</p>
+                <p><strong>Result:</strong> ${test.result}</p>
+                <p><strong>Logic:</strong> ${test.shouldShow ? '✅ Event has passed - Show button' : '❌ Event not passed yet - Hide button'}</p>
+            `;
+            container.appendChild(div);
+        });
+    </script>
+</body>
+</html>
