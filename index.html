@@ -1327,15 +1327,24 @@
 
         // Toggle wishlist expansion
         function toggleWishlist(username) {
-            // Collapse all others
+            // Get current state
+            const currentState = expandedWishlists[username]; // undefined, true, or false
+            
+            // Accordion behavior: Reset all others to default state (undefined)
             for (const key in expandedWishlists) {
                 if (key !== username) {
-                    expandedWishlists[key] = false;
+                    delete expandedWishlists[key]; // Back to default (4 items or 0 if purchased)
                 }
             }
             
-            // Toggle the clicked one
-            expandedWishlists[username] = !expandedWishlists[username];
+            // Toggle the clicked wishlist
+            if (currentState === true) {
+                // Currently expanded → go back to default
+                delete expandedWishlists[username];
+            } else {
+                // Currently collapsed or default → expand to show all
+                expandedWishlists[username] = true;
+            }
             
             // Re-render
             renderWishlists();
@@ -1379,20 +1388,35 @@
                 if (user.items.length === 0) {
                     html += '<p style="color: #999; font-style: italic; text-align: center; padding: 20px;">No items yet</p>';
                 } else {
-                    // Determine how many items to show
-                    const isExpanded = expandedWishlists[username] !== undefined ? expandedWishlists[username] : true; // Default to expanded
+                    // Determine display state
+                    // expandedWishlists[username] can be: undefined (default), true (expanded), false (collapsed after purchase)
+                    const explicitState = expandedWishlists[username];
                     
-                    // If collapsed, show 0 items. If expanded (or default for own wishlist), show all items
                     let itemsToDisplay;
-                    let showExpandButton = false;
+                    let buttonText = null;
+                    const ITEMS_TO_SHOW = 4;
                     
-                    if (isExpanded || isOwnWishlist) {
-                        // Show all items when expanded or viewing own wishlist
+                    if (explicitState === true) {
+                        // Explicitly expanded - show ALL items
                         itemsToDisplay = user.items;
-                    } else {
-                        // Show no items when collapsed (after purchase)
+                        buttonText = '▲ Show Less';
+                    } else if (explicitState === false) {
+                        // Explicitly collapsed (after purchase) - show 0 items
                         itemsToDisplay = [];
-                        showExpandButton = true;
+                        buttonText = `▼ Show Items (${user.items.length})`;
+                    } else {
+                        // Default state - depends on whether you've purchased
+                        if (hasPurchasedFromUser) {
+                            // You've purchased for them - default to fully collapsed
+                            itemsToDisplay = [];
+                            buttonText = `▼ Show Items (${user.items.length})`;
+                        } else {
+                            // Haven't purchased - show 4 items by default
+                            itemsToDisplay = user.items.slice(0, ITEMS_TO_SHOW);
+                            if (user.items.length > ITEMS_TO_SHOW) {
+                                buttonText = `▼ Show More (${user.items.length - ITEMS_TO_SHOW} more)`;
+                            }
+                        }
                     }
                     
                     itemsToDisplay.forEach((item, index) => {
@@ -1485,8 +1509,8 @@
                         html += '</div>';
                     });
                     
-                    // Add "See more" / "Hide items" button (but not for own wishlist)
-                    if (!isOwnWishlist && (showExpandButton || isExpanded)) {
+                    // Show expand/collapse button if there's button text
+                    if (buttonText) {
                         html += `
                             <div style="text-align: center; margin-top: 15px;">
                                 <button onclick="toggleWishlist('${username}')" style="
@@ -1500,7 +1524,7 @@
                                     font-weight: 600;
                                     box-shadow: none;
                                 ">
-                                    ${isExpanded ? '▲ Hide Items' : `▼ Show Items (${user.items.length})`}
+                                    ${buttonText}
                                 </button>
                             </div>
                         `;
