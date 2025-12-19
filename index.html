@@ -967,39 +967,156 @@
         function applyTheme(themeName) {
             const theme = themes[themeName] || themes.Christmas;
             currentTheme = themeName;
-            
+
             // Update CSS variables
             document.documentElement.style.setProperty('--primary-color', theme.primaryColor);
             document.documentElement.style.setProperty('--secondary-color', theme.secondaryColor);
             document.documentElement.style.setProperty('--button-background', theme.buttonStyle);
             document.body.style.background = theme.background;
-            
+
             // Update header emojis
             const headerEmoji1 = document.getElementById('headerEmoji');
             const headerEmoji2 = document.getElementById('headerEmoji2');
             if (headerEmoji1) headerEmoji1.textContent = theme.headerEmoji1;
             if (headerEmoji2) headerEmoji2.textContent = theme.headerEmoji2;
-            
+
             // Remove existing falling items
             document.querySelectorAll('.snowflake').forEach(el => el.remove());
-            
+
             // Create new falling items with theme
             createFallingItems(theme.fallingItem);
         }
 
+        // Observer Mode Functions
+        function enableObserverMode() {
+            console.log('🔒 Admin Observer Mode Enabled');
+
+            // Add observer banner at top of page
+            const banner = document.createElement('div');
+            banner.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                color: white;
+                padding: 10px 20px;
+                text-align: center;
+                font-weight: bold;
+                z-index: 10000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            `;
+            banner.innerHTML = '🔒 ADMIN OBSERVER MODE - Read Only';
+            document.body.insertBefore(banner, document.body.firstChild);
+
+            // Adjust page padding to account for banner
+            document.body.style.paddingTop = '50px';
+
+            // Store that we're in observer mode
+            window.isObserverMode = true;
+
+            // Skip the join screen and go straight to loading
+            const hash = window.location.hash.substring(1);
+            if (hash) {
+                groupId = hash;
+                loadGroupAsObserver();
+            }
+        }
+
+        async function loadGroupAsObserver() {
+            try {
+                const response = await fetch(`/api/groups/${groupId}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    groupData = result.data;
+
+                    // Apply theme
+                    if (groupData.holiday) {
+                        applyTheme(groupData.holiday);
+                    }
+
+                    // Set a fake current user for display purposes (won't be saved)
+                    currentUser = '[ADMIN OBSERVER]';
+
+                    // Disable all interactions
+                    makeReadOnly();
+
+                    // Show the app
+                    showAppScreen();
+                } else {
+                    alert('Group not found');
+                }
+            } catch (error) {
+                console.error('Error loading group:', error);
+                alert('Error loading group');
+            }
+        }
+
+        function makeReadOnly() {
+            // Disable all input fields and buttons after the page loads
+            setTimeout(() => {
+                // Disable wishlist input
+                const wishlistItem = document.getElementById('wishlistItem');
+                const itemPriority = document.getElementById('itemPriority');
+                const itemPrice = document.getElementById('itemPrice');
+                const itemDetails = document.getElementById('itemDetails');
+
+                if (wishlistItem) wishlistItem.disabled = true;
+                if (itemPriority) itemPriority.disabled = true;
+                if (itemPrice) itemPrice.disabled = true;
+                if (itemDetails) itemDetails.disabled = true;
+
+                // Hide add button
+                const buttons = document.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    const btnText = btn.textContent;
+                    if (btnText.includes('Add to My Wishlist') ||
+                        btnText.includes('Reset Group') ||
+                        btnText.includes('Claim') ||
+                        btnText.includes('Unclaim') ||
+                        btnText.includes('Purchased') ||
+                        btnText.includes('Split') ||
+                        btnText.includes('Edit') ||
+                        btnText.includes('Remove User')) {
+                        btn.style.display = 'none';
+                    }
+                });
+
+                // Hide delete buttons
+                document.querySelectorAll('.delete-item-btn').forEach(btn => {
+                    btn.style.display = 'none';
+                });
+
+                // Disable save functionality
+                window.saveData = async function() {
+                    console.log('Save blocked - Observer mode');
+                };
+            }, 100);
+        }
+
         // Initialize on page load
         window.addEventListener('DOMContentLoaded', () => {
+            // Check for admin observer mode
+            const urlParams = new URLSearchParams(window.location.search);
+            const isAdminMode = urlParams.get('admin') === 'true';
+
+            if (isAdminMode) {
+                enableObserverMode();
+                return; // Skip normal initialization
+            }
+
             checkDonationBanner();
             applyTheme('Christmas'); // Apply default theme
-            
+
             // Add event listener for holiday selection to change theme and auto-fill dates
             const holidaySelect = document.getElementById('holidaySelect');
             const eventDateInput = document.getElementById('eventDate');
-            
+
             if (holidaySelect && eventDateInput) {
                 holidaySelect.addEventListener('change', function() {
                     applyTheme(this.value);
-                    
+
                     // Auto-fill date for Christmas and Hanukkah
                     if (this.value === 'Christmas') {
                         eventDateInput.value = getNextChristmas();
@@ -1007,13 +1124,13 @@
                         eventDateInput.value = getNextHanukkah();
                     }
                 });
-                
+
                 // Set initial date for Christmas (default selection)
                 if (holidaySelect.value === 'Christmas') {
                     eventDateInput.value = getNextChristmas();
                 }
             }
-            
+
             // Check if there's a group ID in the URL
             const hash = window.location.hash.substring(1);
             if (hash) {
@@ -1031,7 +1148,7 @@
 
             // Poll for updates every 10 seconds
             setInterval(() => {
-                if (groupId && currentUser) {
+                if (groupId && currentUser && !window.isObserverMode) {
                     loadGroup(true); // Silent reload
                 }
             }, 10000);
@@ -1385,8 +1502,8 @@
                         <h3>${username} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
-                            ${currentUser === groupData.createdBy && username !== currentUser ? 
-                                `<button onclick="deleteUser('${username}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>` 
+                            ${!window.isObserverMode && currentUser === groupData.createdBy && username !== currentUser ?
+                                `<button onclick="deleteUser('${username}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>`
                                 : ''}
                         </div>
                     </div>
@@ -1440,9 +1557,9 @@
                         if (!isOwnWishlist && isPurchased) itemClass += ' purchased';
 
                         html += `<div class="${itemClass}">`;
-                        
-                        // Delete button for own items (X in top right)
-                        if (isOwnWishlist) {
+
+                        // Delete button for own items (X in top right) - not in observer mode
+                        if (isOwnWishlist && !window.isObserverMode) {
                             html += `<button onclick="deleteItem(${index})" class="delete-item-btn" title="Delete this item">×</button>`;
                         }
                         
@@ -1477,15 +1594,16 @@
                         // Edit button section
                         // Show edit button if: 1) it's your own item, OR 2) you're the group creator
                         const canEdit = isOwnWishlist || (currentUser === groupData.createdBy);
-                        
-                        if (canEdit || !isOwnWishlist) {
+
+                        // Only show action buttons if NOT in observer mode
+                        if (!window.isObserverMode && (canEdit || !isOwnWishlist)) {
                             html += '<div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">';
-                            
+
                             // Edit button - show for own items OR if you're the creator
                             if (canEdit) {
                                 html += `<button onclick="showEditItemModal('${username}', ${index})" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
                             }
-                            
+
                             // Gift coordination buttons (only show for others' wishlists)
                             if (!isOwnWishlist) {
                                 if (!isPurchased) {

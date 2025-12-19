@@ -1,7 +1,3 @@
-# 🎄 Holiday Gift Exchange App
-
-A festive web app for organizing gift exchanges with family and friends. Each group gets a unique shareable link, and members can add wishlists, claim gifts, and coordinate purchases.
-
 # 🎄 ComeGiftIt - Holiday Gift Exchange App
 
 A festive web app for organizing gift exchanges with family and friends. Each group gets a unique shareable link, and members can add wishlists, claim gifts, and coordinate purchases—all while preserving the surprise of who's getting what!
@@ -58,6 +54,41 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 - 🕐 **2-Year Data Retention** - Groups automatically deleted after 2 years
 - 📧 **Contact Form** - Built-in feedback system via Web3Forms
 
+## 🔐 Admin Dashboard
+
+The admin dashboard provides essential management tools for ComeGiftIt.
+
+### Access
+Navigate to `/admin` on your deployed site and log in with the admin password (set in `.env` as `ADMIN_PASSWORD`).
+
+### Features
+- **System Statistics**: View total groups, users, items, and contact submissions in real-time
+- **Groups Management**: Search, view, and delete groups with detailed information
+- **Observer Mode**: View any group without joining or affecting data - your name won't appear and no changes will be saved
+- **Contact Submissions**: View and manage user feedback from the contact form
+- **Manual Cleanup**: Trigger deletion of old groups (2+ years)
+
+### Observer Mode
+The observer mode is a powerful feature that lets you debug user issues without affecting their data:
+1. In the admin dashboard, find the group you want to inspect
+2. Click "👁️ View" to open it in observer mode
+3. A red banner will appear at the top indicating "ADMIN OBSERVER MODE - Read Only"
+4. You can see all wishlists, claims, and purchases without your name appearing in the user list
+5. All input fields and action buttons are disabled - no data can be modified
+
+### Security
+- Sessions expire after 2 hours of inactivity
+- Login attempts are rate-limited (3 attempts per 15 minutes)
+- All admin actions are logged to console (visible in Railway logs)
+- Admin password is stored as an environment variable
+- In-memory session storage (cleared on server restart)
+
+### Setting Up Admin Access
+1. Update the `ADMIN_PASSWORD` in your `.env` file
+2. Use a strong password (20+ characters, mix of letters/numbers/symbols)
+3. For Railway deployment, add `ADMIN_PASSWORD` as an environment variable in the project settings
+4. Never commit the `.env` file to version control (it's already in `.gitignore`)
+
 ## 🚀 Deployment to Railway
 
 ### Quick Deploy (Recommended)
@@ -73,10 +104,11 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
    - Choose "GitHub Repo"
    - Connect your GitHub account and select your repo
    - Railway will auto-detect the Node.js project and deploy!
-5. **Environment Variables**: 
+5. **Environment Variables**:
    - `DATABASE_URL` is set automatically by Railway
    - `PORT` is set automatically by Railway
-   - No additional config needed!
+   - `ADMIN_PASSWORD` - Add this manually in Railway's environment variables for admin dashboard access
+   - Use a strong password (20+ characters, mix of letters/numbers/symbols)
 
 ### Optional: Set Up Contact Form Email
 The app includes a contact form that uses Web3Forms (free service):
@@ -186,11 +218,23 @@ As the group creator, you have special abilities:
 
 ### Database Schema
 ```sql
+-- Groups table
 CREATE TABLE groups (
   group_id VARCHAR(255) PRIMARY KEY,
   data JSONB NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Contact submissions table (for admin dashboard)
+CREATE TABLE contact_submissions (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100),
+  email VARCHAR(100),
+  message TEXT,
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  status VARCHAR(20) DEFAULT 'new',
+  admin_notes TEXT
 );
 ```
 
@@ -202,17 +246,32 @@ https://comegiftit.up.railway.app/#abc123xyz
 ```
 
 ### API Endpoints
-The backend provides three REST API endpoints:
+
+**Public Endpoints:**
 - `GET /api/groups/:groupId` - Retrieve group data
 - `POST /api/groups/:groupId` - Create or update group data
 - `DELETE /api/groups/:groupId` - Delete group data (reset)
+- `POST /api/contact` - Submit contact form
 - `GET /api/health` - Health check endpoint
+
+**Admin Endpoints (require authentication):**
+- `POST /admin/api/login` - Admin login
+- `POST /admin/api/logout` - Admin logout
+- `GET /admin/api/stats` - Get system statistics
+- `GET /admin/api/groups` - List all groups (with search)
+- `GET /admin/api/groups/:groupId` - Get specific group data
+- `DELETE /admin/api/groups/:groupId` - Delete group
+- `GET /admin/api/contacts` - List contact submissions
+- `PUT /admin/api/contacts/:id` - Update contact status
+- `POST /admin/api/cleanup` - Manual cleanup trigger
+- `GET /admin` - Admin dashboard page
 
 ### Rate Limiting
 - **Read operations** (GET): 100 requests/minute
 - **Write operations** (POST/DELETE): 30 requests/minute
 - **Group creation**: 10 groups/hour
 - **Contact form**: 3 submissions/hour
+- **Admin login**: 3 attempts/15 minutes
 - **General limit**: 1000 requests/15 minutes
 - **Polling**: Updates every 10 seconds
 
