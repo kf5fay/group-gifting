@@ -120,6 +120,23 @@ pool.query(`
   `);
 }).then(() => {
   console.log('✅ Contact submissions table initialized');
+
+  // Add created_at column to groups table if it doesn't exist (migration for existing databases)
+  return pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'groups' AND column_name = 'created_at'
+      ) THEN
+        ALTER TABLE groups ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        -- Set created_at to updated_at for existing rows
+        UPDATE groups SET created_at = updated_at WHERE created_at IS NULL;
+      END IF;
+    END $$;
+  `);
+}).then(() => {
+  console.log('✅ Database migration completed (added created_at column if needed)');
 }).catch(err => {
   console.error('❌ Database initialization error:', err);
 });
