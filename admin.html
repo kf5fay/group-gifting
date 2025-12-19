@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ComeGiftIt - Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
+        .login-screen {
+            max-width: 400px;
+            margin: 100px auto;
+        }
+
+        .dashboard {
+            display: none;
+        }
+
+        .dashboard.show {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        input[type="password"],
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .actions button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .message {
+            padding: 12px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .message-success {
+            background: #e8f5e9;
+            color: #2ecc71;
+            border: 1px solid #2ecc71;
+        }
+
+        .message-error {
+            background: #ffe5e5;
+            color: #f5576c;
+            border: 1px solid #f5576c;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .close-btn {
+            background: #f5576c;
+            border: none;
+            font-size: 18px;
+            color: white;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+
+        .search-bar {
+            margin-bottom: 20px;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-new {
+            background: #ffe5e5;
+            color: #f5576c;
+        }
+
+        .badge-read {
+            background: #e8f5e9;
+            color: #2ecc71;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Screen -->
+        <div id="loginScreen" class="login-screen">
+            <div class="card">
+                <h1>🔐 Admin Dashboard</h1>
+                <p style="text-align: center; color: #666; margin-bottom: 30px;">ComeGiftIt Administration</p>
+
+                <div id="loginMessage"></div>
+
+                <form id="loginForm" onsubmit="login(event)">
+                    <input type="password" id="passwordInput" placeholder="Admin Password" required>
+                    <button type="submit" style="width: 100%;">Login</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Dashboard -->
+        <div id="dashboard" class="dashboard">
+            <!-- Header -->
+            <div class="card">
+                <div class="header-actions">
+                    <h1 style="text-align: left; margin: 0;">ComeGiftIt Admin</h1>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="refreshStats()" class="btn-success">🔄 Refresh</button>
+                        <button onclick="logout()" class="btn-secondary">Logout</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="card">
+                <h2>📊 System Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="number" id="totalGroups">-</div>
+                        <div class="label">Total Groups</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="totalUsers">-</div>
+                        <div class="label">Total Users</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="totalItems">-</div>
+                        <div class="label">Total Items</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="totalContacts">-</div>
+                        <div class="label">Contact Forms</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="newContacts">-</div>
+                        <div class="label">New Contacts</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="groupsCreatedToday">-</div>
+                        <div class="label">Groups Today</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Groups Management -->
+            <div class="card">
+                <h2>🎁 Groups Management</h2>
+                <div class="search-bar">
+                    <input type="text" id="groupSearch" placeholder="Search groups..." onkeyup="searchGroups()">
+                </div>
+                <div id="groupsContainer">
+                    <div class="loading">Loading groups...</div>
+                </div>
+            </div>
+
+            <!-- Contact Submissions -->
+            <div class="card">
+                <h2>📧 Contact Submissions</h2>
+                <div id="contactsContainer">
+                    <div class="loading">Loading contacts...</div>
+                </div>
+            </div>
+
+            <!-- System Actions -->
+            <div class="card">
+                <h2>🧹 System Actions</h2>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button onclick="runCleanup()" class="btn-danger">🗑️ Run Cleanup (Delete Old Groups)</button>
+                    <button onclick="refreshStats()" class="btn-success">🔄 Refresh All Data</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JSON Viewer Modal -->
+    <div id="jsonModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📄 Group Data (JSON)</h2>
+                <button class="close-btn" onclick="hideModal('jsonModal')">&times;</button>
+            </div>
+            <pre id="jsonContent"></pre>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        let currentGroups = [];
+
+        // Check for saved session
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedToken = sessionStorage.getItem('adminToken');
+            if (savedToken) {
+                authToken = savedToken;
+                showDashboard();
+            }
+        });
+
+        // Login
+        async function login(event) {
+            event.preventDefault();
+
+            const password = document.getElementById('passwordInput').value;
+            const messageDiv = document.getElementById('loginMessage');
+
+            try {
+                const response = await fetch('/admin/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    authToken = result.token;
+                    sessionStorage.setItem('adminToken', authToken);
+                    showDashboard();
+                } else {
+                    messageDiv.innerHTML = `<div class="message message-error">${result.message}</div>`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<div class="message message-error">Login failed. Please try again.</div>';
+            }
+        }
+
+        // Logout
+        async function logout() {
+            if (authToken) {
+                try {
+                    await fetch('/admin/api/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${authToken}`
+                        }
+                    });
+                } catch (error) {
+                    console.error('Logout error:', error);
+                }
+            }
+
+            authToken = null;
+            sessionStorage.removeItem('adminToken');
+            document.getElementById('loginScreen').style.display = 'block';
+            document.getElementById('dashboard').classList.remove('show');
+            document.getElementById('passwordInput').value = '';
+        }
+
+        // Show Dashboard
+        function showDashboard() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('dashboard').classList.add('show');
+            loadDashboardData();
+        }
+
+        // Load all dashboard data
+        async function loadDashboardData() {
+            await Promise.all([
+                loadStats(),
+                loadGroups(),
+                loadContacts()
+            ]);
+        }
+
+        // Load Stats
+        async function loadStats() {
+            try {
+                const response = await fetch('/admin/api/stats', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('totalGroups').textContent = result.stats.totalGroups;
+                    document.getElementById('totalUsers').textContent = result.stats.totalUsers;
+                    document.getElementById('totalItems').textContent = result.stats.totalItems;
+                    document.getElementById('totalContacts').textContent = result.stats.totalContacts;
+                    document.getElementById('newContacts').textContent = result.stats.newContacts;
+                    document.getElementById('groupsCreatedToday').textContent = result.stats.groupsCreatedToday;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Load Groups
+        async function loadGroups(search = '') {
+            const container = document.getElementById('groupsContainer');
+
+            try {
+                const url = search
+                    ? `/admin/api/groups?search=${encodeURIComponent(search)}`
+                    : '/admin/api/groups';
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    currentGroups = result.groups;
+
+                    if (result.groups.length === 0) {
+                        container.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No groups found</p>';
+                        return;
+                    }
+
+                    let html = '<table><thead><tr><th>Group Name</th><th>Theme</th><th>Users</th><th>Items</th><th>Updated</th><th>Actions</th></tr></thead><tbody>';
+
+                    result.groups.forEach(group => {
+                        const updatedDate = new Date(group.updatedAt).toLocaleDateString();
+                        html += `
+                            <tr>
+                                <td><strong>${escapeHtml(group.groupName)}</strong></td>
+                                <td>${escapeHtml(group.holiday || 'N/A')}</td>
+                                <td>${group.userCount}</td>
+                                <td>${group.itemCount}</td>
+                                <td>${updatedDate}</td>
+                                <td>
+                                    <div class="actions">
+                                        <button onclick="viewGroupAsObserver('${group.groupId}')" class="btn-success">👁️ View</button>
+                                        <button onclick="viewGroupJSON('${group.groupId}')">📄 JSON</button>
+                                        <button onclick="deleteGroup('${group.groupId}')" class="btn-danger">🗑️ Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                }
+            } catch (error) {
+                console.error('Error loading groups:', error);
+                container.innerHTML = '<p style="text-align: center; color: #f5576c; padding: 20px;">Error loading groups</p>';
+            }
+        }
+
+        // Search Groups
+        let searchTimeout;
+        function searchGroups() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const search = document.getElementById('groupSearch').value.trim();
+                loadGroups(search);
+            }, 300);
+        }
+
+        // View Group as Observer
+        function viewGroupAsObserver(groupId) {
+            const url = `${window.location.origin}/#${groupId}?admin=true`;
+            window.open(url, '_blank');
+        }
+
+        // View Group JSON
+        async function viewGroupJSON(groupId) {
+            try {
+                const response = await fetch(`/admin/api/groups/${groupId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('jsonContent').textContent = JSON.stringify(result.data, null, 2);
+                    showModal('jsonModal');
+                }
+            } catch (error) {
+                alert('Error loading group data');
+            }
+        }
+
+        // Delete Group
+        async function deleteGroup(groupId) {
+            if (!confirm('Are you sure you want to delete this group? This action cannot be undone!')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/api/groups/${groupId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('Group deleted successfully');
+                    loadDashboardData();
+                } else {
+                    alert('Error deleting group');
+                }
+            } catch (error) {
+                alert('Error deleting group');
+            }
+        }
+
+        // Load Contacts
+        async function loadContacts() {
+            const container = document.getElementById('contactsContainer');
+
+            try {
+                const response = await fetch('/admin/api/contacts', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (result.contacts.length === 0) {
+                        container.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No contact submissions</p>';
+                        return;
+                    }
+
+                    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Message</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+
+                    result.contacts.forEach(contact => {
+                        const date = new Date(contact.submitted_at).toLocaleString();
+                        const statusBadge = contact.status === 'new'
+                            ? '<span class="badge badge-new">NEW</span>'
+                            : '<span class="badge badge-read">READ</span>';
+
+                        html += `
+                            <tr>
+                                <td><strong>${escapeHtml(contact.name)}</strong></td>
+                                <td>${escapeHtml(contact.email)}</td>
+                                <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(contact.message)}</td>
+                                <td style="white-space: nowrap;">${date}</td>
+                                <td>${statusBadge}</td>
+                                <td>
+                                    <div class="actions">
+                                        ${contact.status === 'new'
+                                            ? `<button onclick="markContactRead(${contact.id})" class="btn-success">✓ Mark Read</button>`
+                                            : `<button onclick="markContactNew(${contact.id})" class="btn-secondary">Mark New</button>`
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                }
+            } catch (error) {
+                console.error('Error loading contacts:', error);
+                container.innerHTML = '<p style="text-align: center; color: #f5576c; padding: 20px;">Error loading contacts</p>';
+            }
+        }
+
+        // Mark Contact Read
+        async function markContactRead(id) {
+            await updateContactStatus(id, 'read');
+        }
+
+        // Mark Contact New
+        async function markContactNew(id) {
+            await updateContactStatus(id, 'new');
+        }
+
+        // Update Contact Status
+        async function updateContactStatus(id, status) {
+            try {
+                const response = await fetch(`/admin/api/contacts/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    loadDashboardData();
+                }
+            } catch (error) {
+                alert('Error updating contact status');
+            }
+        }
+
+        // Run Cleanup
+        async function runCleanup() {
+            if (!confirm('This will delete all groups older than 2 years. Continue?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/api/cleanup', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`Cleanup complete. Deleted ${result.deletedCount} groups.`);
+                    loadDashboardData();
+                } else {
+                    alert('Error running cleanup');
+                }
+            } catch (error) {
+                alert('Error running cleanup');
+            }
+        }
+
+        // Refresh Stats
+        async function refreshStats() {
+            await loadDashboardData();
+            alert('Data refreshed!');
+        }
+
+        // Modal Management
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.add('show');
+        }
+
+        function hideModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        // Utility Functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.classList.remove('show');
+                }
+            });
+        };
+    </script>
+</body>
+</html>
