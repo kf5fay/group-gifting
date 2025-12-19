@@ -79,6 +79,13 @@ const contactLimiter = rateLimit({
   message: { success: false, message: 'Too many contact submissions, please try again later.' }
 });
 
+// Admin login rate limiter
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 3, // 3 attempts per 15 minutes
+  message: { success: false, message: 'Too many login attempts' }
+});
+
 // Apply general rate limiting to all requests
 app.use(generalLimiter);
 
@@ -98,23 +105,59 @@ pool.query(`
   )
 `).then(() => {
   console.log('✅ Database initialized successfully');
+
+  // Create contact_submissions table
+  return pool.query(`
+    CREATE TABLE IF NOT EXISTS contact_submissions (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100),
+      email VARCHAR(100),
+      message TEXT,
+      submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      status VARCHAR(20) DEFAULT 'new',
+      admin_notes TEXT
+    )
+  `);
+}).then(() => {
+  console.log('✅ Contact submissions table initialized');
 }).catch(err => {
   console.error('❌ Database initialization error:', err);
 });
 
+// Admin session storage (in-memory for simplicity)
+const adminSessions = new Map(); // sessionToken -> { createdAt, expiresAt }
+
+// Middleware to check admin authentication
+function requireAdmin(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const token = authHeader.substring(7);
+  const session = adminSessions.get(token);
+
+  if (!session || Date.now() > session.expiresAt) {
+    adminSessions.delete(token);
+    return res.status(401).json({ success: false, message: 'Session expired' });
+  }
+
+  next();
+}
+
 // Helper function to sanitize strings
 function sanitizeString(str, maxLength = 500) {
   if (typeof str !== 'string') return '';
-  
+
   // Remove any HTML tags and scripts
   let sanitized = str.replace(/<[^>]*>/g, '');
-  
+
   // Remove potentially dangerous characters
   sanitized = sanitized.replace(/[<>\"\']/g, '');
-  
+
   // Trim and limit length
   sanitized = sanitized.trim().substring(0, maxLength);
-  
+
   return sanitized;
 }
 
@@ -375,58 +418,276 @@ app.delete('/api/groups/:groupId', writeLimiter, async (req, res) => {
   }
 });
 
-// Contact form endpoint - LOGS TO CONSOLE ONLY (no email)
+// Contact form endpoint - Saves to database
 app.post('/api/contact', contactLimiter, async (req, res) => {
   try {
     const { name, email, message } = req.body;
-    
+
     // Validate inputs
     if (!name || !email || !message) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'All fields are required' 
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required'
       });
     }
-    
+
     if (!validator.isEmail(email)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid email address' 
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email address'
       });
     }
-    
+
     if (name.length > 100 || message.length > 2000) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Input too long' 
+      return res.status(400).json({
+        success: false,
+        message: 'Input too long'
       });
     }
-    
+
     // Sanitize inputs
     const sanitizedName = sanitizeString(name, 100);
     const sanitizedEmail = validator.normalizeEmail(email);
     const sanitizedMessage = sanitizeString(message, 2000);
-    
-    // Log to console (you can check Railway logs)
+
+    // Store in database
+    await pool.query(
+      'INSERT INTO contact_submissions (name, email, message) VALUES ($1, $2, $3)',
+      [sanitizedName, sanitizedEmail, sanitizedMessage]
+    );
+
+    // Also log to console for immediate visibility
     console.log('\n📧 ===== CONTACT FORM SUBMISSION =====');
     console.log('From:', sanitizedName);
     console.log('Email:', sanitizedEmail);
     console.log('Message:', sanitizedMessage);
     console.log('Time:', new Date().toISOString());
     console.log('=====================================\n');
-    
-    res.json({ 
-      success: true, 
-      message: 'Message received! Thank you for your feedback.' 
+
+    res.json({
+      success: true,
+      message: 'Message received! Thank you for your feedback.'
     });
   } catch (error) {
     console.error('Error processing contact form:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error sending message. Please try again later.' 
+    res.status(500).json({
+      success: false,
+      message: 'Error sending message. Please try again later.'
     });
   }
 });
+
+// ===== ADMIN ENDPOINTS =====
+
+// Admin login
+app.post('/admin/api/login', adminLoginLimiter, (req, res) => {
+  const { password } = req.body;
+
+  if (!process.env.ADMIN_PASSWORD) {
+    return res.status(500).json({
+      success: false,
+      message: 'Admin password not configured'
+    });
+  }
+
+  if (password !== process.env.ADMIN_PASSWORD) {
+    console.log('❌ Failed admin login attempt');
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid password'
+    });
+  }
+
+  // Generate session token
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(32).toString('hex');
+  const session = {
+    createdAt: Date.now(),
+    expiresAt: Date.now() + (2 * 60 * 60 * 1000) // 2 hours
+  };
+
+  adminSessions.set(token, session);
+  console.log('✅ Admin logged in');
+
+  res.json({ success: true, token });
+});
+
+// Admin logout
+app.post('/admin/api/logout', requireAdmin, (req, res) => {
+  const token = req.headers.authorization.substring(7);
+  adminSessions.delete(token);
+  console.log('✅ Admin logged out');
+  res.json({ success: true });
+});
+
+// Get system stats
+app.get('/admin/api/stats', requireAdmin, async (req, res) => {
+  try {
+    const groupsResult = await pool.query('SELECT COUNT(*) as count FROM groups');
+    const groupsCount = parseInt(groupsResult.rows[0].count);
+
+    const allGroups = await pool.query('SELECT data FROM groups');
+    let totalUsers = 0;
+    let totalItems = 0;
+
+    allGroups.rows.forEach(row => {
+      const data = row.data;
+      if (data.users) {
+        totalUsers += Object.keys(data.users).length;
+        Object.values(data.users).forEach(user => {
+          totalItems += user.items?.length || 0;
+        });
+      }
+    });
+
+    const contactsResult = await pool.query(
+      "SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'new') as new FROM contact_submissions"
+    );
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const createdTodayResult = await pool.query(
+      'SELECT COUNT(*) as count FROM groups WHERE created_at >= $1',
+      [todayStart]
+    );
+
+    res.json({
+      success: true,
+      stats: {
+        totalGroups: groupsCount,
+        totalUsers,
+        totalItems,
+        totalContacts: parseInt(contactsResult.rows[0].total),
+        newContacts: parseInt(contactsResult.rows[0].new),
+        groupsCreatedToday: parseInt(createdTodayResult.rows[0].count)
+      }
+    });
+  } catch (error) {
+    console.error('Error getting stats:', error);
+    res.status(500).json({ success: false, message: 'Error loading stats' });
+  }
+});
+
+// List all groups (paginated, searchable)
+app.get('/admin/api/groups', requireAdmin, async (req, res) => {
+  try {
+    const search = req.query.search || '';
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    let query = 'SELECT group_id, data, created_at, updated_at FROM groups';
+    let params = [];
+
+    if (search) {
+      query += " WHERE data->>'groupName' ILIKE $1";
+      params.push(`%${search}%`);
+    }
+
+    query += ' ORDER BY updated_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(limit, offset);
+
+    const result = await pool.query(query, params);
+
+    const groups = result.rows.map(row => ({
+      groupId: row.group_id,
+      groupName: row.data.groupName,
+      holiday: row.data.holiday,
+      eventDate: row.data.eventDate,
+      userCount: Object.keys(row.data.users || {}).length,
+      itemCount: Object.values(row.data.users || {}).reduce((sum, user) => sum + (user.items?.length || 0), 0),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+
+    res.json({ success: true, groups });
+  } catch (error) {
+    console.error('Error listing groups:', error);
+    res.status(500).json({ success: false, message: 'Error loading groups' });
+  }
+});
+
+// Get specific group (for observer mode)
+app.get('/admin/api/groups/:groupId', requireAdmin, async (req, res) => {
+  try {
+    const groupId = req.params.groupId;
+    const result = await pool.query('SELECT data FROM groups WHERE group_id = $1', [groupId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Group not found' });
+    }
+
+    res.json({ success: true, data: result.rows[0].data });
+  } catch (error) {
+    console.error('Error loading group:', error);
+    res.status(500).json({ success: false, message: 'Error loading group' });
+  }
+});
+
+// Delete group
+app.delete('/admin/api/groups/:groupId', requireAdmin, async (req, res) => {
+  try {
+    const groupId = req.params.groupId;
+    await pool.query('DELETE FROM groups WHERE group_id = $1', [groupId]);
+    console.log(`🗑️ Admin deleted group: ${groupId}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting group:', error);
+    res.status(500).json({ success: false, message: 'Error deleting group' });
+  }
+});
+
+// List contact submissions
+app.get('/admin/api/contacts', requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM contact_submissions ORDER BY submitted_at DESC'
+    );
+    res.json({ success: true, contacts: result.rows });
+  } catch (error) {
+    console.error('Error loading contacts:', error);
+    res.status(500).json({ success: false, message: 'Error loading contacts' });
+  }
+});
+
+// Update contact submission status
+app.put('/admin/api/contacts/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminNotes } = req.body;
+
+    await pool.query(
+      'UPDATE contact_submissions SET status = $1, admin_notes = $2 WHERE id = $3',
+      [status, adminNotes || null, id]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating contact:', error);
+    res.status(500).json({ success: false, message: 'Error updating contact' });
+  }
+});
+
+// Manual cleanup trigger
+app.post('/admin/api/cleanup', requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "DELETE FROM groups WHERE updated_at < NOW() - INTERVAL '2 years'"
+    );
+    console.log(`🧹 Admin triggered cleanup: ${result.rowCount} groups deleted`);
+    res.json({ success: true, deletedCount: result.rowCount });
+  } catch (error) {
+    console.error('Error running cleanup:', error);
+    res.status(500).json({ success: false, message: 'Error running cleanup' });
+  }
+});
+
+// Serve admin page
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+// ===== END ADMIN ENDPOINTS =====
 
 // Cleanup old groups (optional - runs once when server starts)
 async function cleanupOldGroups() {
