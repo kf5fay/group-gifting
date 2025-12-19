@@ -285,17 +285,61 @@
             color: #666;
         }
 
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin: 15px -15px;
+            padding: 0 15px;
+        }
+
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
 
+            .card {
+                padding: 20px;
+            }
+
+            h2 {
+                font-size: 18px;
+            }
+
+            .table-wrapper {
+                margin: 15px -20px;
+                padding: 0 20px;
+            }
+
             table {
-                font-size: 12px;
+                font-size: 11px;
+                min-width: 600px;
             }
 
             th, td {
-                padding: 8px;
+                padding: 6px 4px;
+                white-space: nowrap;
+            }
+
+            .actions {
+                gap: 4px;
+            }
+
+            .actions button {
+                padding: 4px 8px;
+                font-size: 10px;
+            }
+
+            .header-actions {
+                gap: 8px;
+            }
+
+            .header-actions button {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+
+            .search-bar input {
+                font-size: 14px;
             }
         }
     </style>
@@ -542,7 +586,7 @@
                         return;
                     }
 
-                    let html = '<table><thead><tr><th>Group Name</th><th>Theme</th><th>Users</th><th>Items</th><th>Updated</th><th>Actions</th></tr></thead><tbody>';
+                    let html = '<div class="table-wrapper"><table><thead><tr><th>Group Name</th><th>Theme</th><th>Users</th><th>Items</th><th>Updated</th><th>Actions</th></tr></thead><tbody>';
 
                     result.groups.forEach(group => {
                         const updatedDate = new Date(group.updatedAt).toLocaleDateString();
@@ -564,7 +608,7 @@
                         `;
                     });
 
-                    html += '</tbody></table>';
+                    html += '</tbody></table></div>';
                     container.innerHTML = html;
                 }
             } catch (error) {
@@ -585,7 +629,7 @@
 
         // View Group as Observer
         function viewGroupAsObserver(groupId) {
-            const url = `${window.location.origin}/#${groupId}?admin=true`;
+            const url = `${window.location.origin}/?admin=true#${groupId}`;
             window.open(url, '_blank');
         }
 
@@ -660,7 +704,7 @@
                         return;
                     }
 
-                    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Message</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+                    let html = '<div class="table-wrapper"><table><thead><tr><th>Name</th><th>Email</th><th>Message</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
 
                     result.contacts.forEach(contact => {
                         const date = new Date(contact.submitted_at).toLocaleString();
@@ -687,7 +731,7 @@
                         `;
                     });
 
-                    html += '</tbody></table>';
+                    html += '</tbody></table></div>';
                     container.innerHTML = html;
                 }
             } catch (error) {
