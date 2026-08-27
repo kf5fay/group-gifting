@@ -326,6 +326,67 @@
             color: #888;
         }
 
+        .badge-info-request {
+            background: #e5f0ff;
+            color: #2f6fd0;
+        }
+
+        .badge-info-requested-muted {
+            background: #f0f0f0;
+            color: #888;
+        }
+
+        /* Item on your own list that someone anonymously asked about */
+        .wishlist-item.needs-info {
+            border-left: 4px solid #2f6fd0;
+            background: #f5f9ff;
+        }
+
+        .info-request-note {
+            margin-top: 8px;
+            padding: 8px;
+            background: #e9f2ff;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #2f6fd0;
+        }
+
+        .info-request-banner {
+            display: none;
+            position: relative;
+            margin-bottom: 20px;
+            padding: 15px 45px 15px 15px;
+            background: linear-gradient(135deg, #4facfe 0%, #2f6fd0 100%);
+            border-radius: 10px;
+            color: white;
+        }
+
+        .info-request-banner.show {
+            display: block;
+        }
+
+        .info-request-banner strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .info-request-banner .info-request-dismiss {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+            font-size: 18px;
+            font-weight: 700;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.25) !important;
+            color: white !important;
+            box-shadow: none;
+        }
+
         /* Fix button visibility in claimed items */
         .wishlist-item.claimed button,
         .wishlist-item.claimed .delete-item-btn {
@@ -629,6 +690,13 @@
                 <button onclick="showThankYouModal()" style="background: white !important; color: #f5576c !important; width: auto; margin: 0; padding: 12px 24px; font-weight: 700;">
                     💝 Who Do I Thank?
                 </button>
+            </div>
+
+            <!-- Anonymous "more info requested" notification (owner only) -->
+            <div id="infoRequestBanner" class="info-request-banner">
+                <button class="info-request-dismiss" onclick="dismissInfoRequestBanner()" title="Hide for a day">&times;</button>
+                <strong id="infoRequestBannerTitle">Someone asked for more info</strong>
+                <span id="infoRequestBannerText"></span>
             </div>
 
             <div class="input-group">
@@ -1077,6 +1145,8 @@
                         btnText.includes('Unclaim') ||
                         btnText.includes('Purchased') ||
                         btnText.includes('Split') ||
+                        btnText.includes('Ask for More Info') ||
+                        btnText.includes('Info Requested') ||
                         btnText.includes('Edit') ||
                         btnText.includes('Remove User')) {
                         btn.style.display = 'none';
@@ -1294,6 +1364,11 @@
 
                 if (result.success && result.data) {
                     groupData = result.data;
+
+                    // Drop requests the owner has already answered by editing the item
+                    if (resolveInfoRequests()) {
+                        await saveData();
+                    }
                     
                     // Apply theme based on holiday type
                     if (groupData.holiday) {
@@ -1555,6 +1630,8 @@
                         // Only show claimed status to others, not to the gift recipient
                         if (!isOwnWishlist && isClaimed) itemClass += ' claimed';
                         if (!isOwnWishlist && isPurchased) itemClass += ' purchased';
+                        // Flag your own items that someone has anonymously asked about
+                        if (isOwnWishlist && item.infoRequest) itemClass += ' needs-info';
 
                         html += `<div class="${itemClass}">`;
 
@@ -1571,6 +1648,14 @@
                         }
                         if (item.price) {
                             html += `<span class="badge" style="background: #e5ffe5; color: #27ae60;">${escapeHtml(item.price)}</span>`;
+                        }
+                        // "More info requested" - prominent for the owner, a quiet
+                        // marker for everyone else so they don't pile on duplicate asks.
+                        // Never says who asked.
+                        if (item.infoRequest) {
+                            html += isOwnWishlist
+                                ? `<span class="badge badge-info-request">ℹ️ MORE INFO REQUESTED</span>`
+                                : `<span class="badge badge-info-requested-muted">INFO REQUESTED</span>`;
                         }
                         // Only show claimed/purchased/split status to others, not to the gift recipient
                         if (!isOwnWishlist) {
@@ -1606,6 +1691,13 @@
 
                             // Gift coordination buttons (only show for others' wishlists)
                             if (!isOwnWishlist) {
+                                // Anonymous request for more detail
+                                if (hasRequestedInfo(username, item)) {
+                                    html += `<button disabled style="background: #e0e0e0 !important; color: #777 !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0; box-shadow: none; cursor: default;" title="You already asked for more info on this item">✓ Info Requested</button>`;
+                                } else {
+                                    html += `<button onclick="requestMoreInfo('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Anonymously ask for more details - they won't know it was you">❓ Ask for More Info</button>`;
+                                }
+
                                 if (!isPurchased) {
                                     if (claimedByMe) {
                                         html += `<button onclick="unclaimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
@@ -1619,6 +1711,13 @@
                             }
 
                             html += '</div>';
+                        }
+
+                        // Anonymous request hint on your own item
+                        if (isOwnWishlist && item.infoRequest) {
+                            const askCount = item.infoRequest.count || 1;
+                            const who = askCount > 1 ? `${askCount} people in your group` : 'Someone in your group';
+                            html += `<div class="info-request-note">ℹ️ ${who} asked for more details on this item (anonymously). Tap ✏️ Edit to add size, color, a link, or anything else that helps.</div>`;
                         }
 
                         // Notes (visible to everyone including recipient)
@@ -1659,6 +1758,198 @@
                 card.innerHTML = html;
                 container.appendChild(card);
             }
+
+            updateInfoRequestBanner();
+        }
+
+        // ============================================================
+        // Anonymous "Request More Info"
+        // ------------------------------------------------------------
+        // A member can ask the owner of an item to add more detail without
+        // revealing who asked. Nothing that identifies the requester is ever
+        // written to groupData (the whole group blob is downloaded by every
+        // member, so storing a name there would give the asker away). The only
+        // per-requester state lives in that person's own browser, purely so we
+        // can stop them asking the same item twice.
+        // ============================================================
+
+        const INFO_REQUEST_SNOOZE_MS = 24 * 60 * 60 * 1000; // "X" hides the banner for a day
+
+        // Fingerprint of the fields an owner would change to answer the request.
+        // The notification stays put until this fingerprint changes.
+        function itemInfoSignature(item) {
+            const source = [
+                item.description || '',
+                item.details || '',
+                item.price || '',
+                item.priority || ''
+            ].join('\u0000');
+
+            let hash = 5381;
+            for (let i = 0; i < source.length; i++) {
+                hash = ((hash * 33) ^ source.charCodeAt(i)) >>> 0;
+            }
+            return `${hash.toString(36)}-${source.length.toString(36)}`;
+        }
+
+        // Stable key for an item in this browser's "already asked" list
+        function infoRequestItemKey(username, item) {
+            return item.id ? `id:${item.id}` : `n:${username}::${item.description || ''}`;
+        }
+
+        function askedInfoRequests() {
+            try {
+                const raw = localStorage.getItem(`infoRequestsSent_${groupId}`);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function hasRequestedInfo(username, item) {
+            return askedInfoRequests().includes(infoRequestItemKey(username, item));
+        }
+
+        function rememberInfoRequest(username, item) {
+            const key = infoRequestItemKey(username, item);
+            const asked = askedInfoRequests();
+            if (!asked.includes(key)) {
+                asked.push(key);
+                try {
+                    localStorage.setItem(`infoRequestsSent_${groupId}`, JSON.stringify(asked.slice(-500)));
+                } catch (e) {
+                    // Storage unavailable (private mode, quota) - the request still went through
+                }
+            }
+        }
+
+        // Send an anonymous request for more info on someone else's item
+        async function requestMoreInfo(username, itemIndex) {
+            if (window.isObserverMode) return;
+
+            const user = groupData.users[username];
+            const item = user && user.items[itemIndex];
+            if (!item) return;
+
+            if (username === currentUser) {
+                alert("This is your own item - just edit it to add more details.");
+                return;
+            }
+
+            if (hasRequestedInfo(username, item)) {
+                alert(`You already asked ${username} for more info on this item.`);
+                return;
+            }
+
+            const confirmed = confirm(
+                `Ask ${username} to add more info about "${item.description}"?\n\n` +
+                `They'll see that someone wants more details, but NOT who asked. ` +
+                `The reminder stays on their list until they update the item.`
+            );
+            if (!confirmed) return;
+
+            const existing = item.infoRequest;
+            item.infoRequest = {
+                count: Math.min((existing && existing.count ? existing.count : 0) + 1, 99),
+                signature: itemInfoSignature(item),
+                lastRequestedAt: new Date().toISOString()
+            };
+
+            rememberInfoRequest(username, item);
+
+            await saveData();
+            renderWishlists();
+
+            alert(`Sent anonymously. ${username} will be asked to add more details.`);
+        }
+
+        // Clear requests on your own items once you've actually changed the listing.
+        // Only the owner clears their own items, so polling clients don't race to save.
+        function resolveInfoRequests() {
+            if (window.isObserverMode) return false;
+            if (!currentUser || !groupData.users || !groupData.users[currentUser]) return false;
+
+            let changed = false;
+            for (const item of groupData.users[currentUser].items) {
+                if (item.infoRequest && item.infoRequest.signature !== itemInfoSignature(item)) {
+                    delete item.infoRequest;
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        function myPendingInfoRequests() {
+            if (!currentUser || !groupData.users || !groupData.users[currentUser]) return [];
+            return groupData.users[currentUser].items.filter(item => item.infoRequest);
+        }
+
+        function infoRequestSnoozeKey() {
+            return `infoRequestSnooze_${groupId}_${currentUser}`;
+        }
+
+        function readInfoRequestSnooze() {
+            try {
+                const raw = localStorage.getItem(infoRequestSnoozeKey());
+                const parsed = raw ? JSON.parse(raw) : null;
+                return parsed && typeof parsed === 'object' ? parsed : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // Show a banner when someone has asked about your items.
+        // It only goes away for good when you update the item; the X hides it for
+        // a day, and a brand new request brings it back even during that day.
+        function updateInfoRequestBanner() {
+            const banner = document.getElementById('infoRequestBanner');
+            if (!banner) return;
+
+            const pending = window.isObserverMode ? [] : myPendingInfoRequests();
+
+            if (pending.length === 0) {
+                banner.classList.remove('show');
+                return;
+            }
+
+            const totalAsks = pending.reduce((sum, item) => sum + (item.infoRequest.count || 1), 0);
+            const snooze = readInfoRequestSnooze();
+            const snoozed = snooze &&
+                snooze.until > Date.now() &&
+                (snooze.totalAsks || 0) >= totalAsks; // a new ask re-opens the banner
+
+            if (snoozed) {
+                banner.classList.remove('show');
+                return;
+            }
+
+            const itemNames = pending.map(item => `"${item.description}"`).join(', ');
+            document.getElementById('infoRequestBannerTitle').textContent =
+                pending.length === 1
+                    ? '🔔 Someone asked for more info on one of your items'
+                    : `🔔 Someone asked for more info on ${pending.length} of your items`;
+            document.getElementById('infoRequestBannerText').textContent =
+                `Add details (size, color, link, etc.) to ${itemNames} so they know what to get you. ` +
+                `This reminder stays until you update the item.`;
+
+            banner.classList.add('show');
+        }
+
+        function dismissInfoRequestBanner() {
+            const pending = myPendingInfoRequests();
+            const totalAsks = pending.reduce((sum, item) => sum + (item.infoRequest.count || 1), 0);
+
+            try {
+                localStorage.setItem(infoRequestSnoozeKey(), JSON.stringify({
+                    until: Date.now() + INFO_REQUEST_SNOOZE_MS,
+                    totalAsks: totalAsks
+                }));
+            } catch (e) {
+                // Storage unavailable - banner will simply reappear
+            }
+
+            document.getElementById('infoRequestBanner').classList.remove('show');
         }
 
         // Add Wishlist Item
@@ -1674,6 +1965,7 @@
             }
 
             const item = {
+                id: generateId(),
                 description: description,
                 priority: priority,
                 price: price,
@@ -1795,7 +2087,12 @@
             item.priority = priority;
             item.price = price;
             item.details = details;
-            
+
+            // Updating the listing answers any anonymous request for more info
+            if (item.infoRequest && item.infoRequest.signature !== itemInfoSignature(item)) {
+                delete item.infoRequest;
+            }
+
             await saveData();
             renderWishlists();
             hideModal('editItemModal');
