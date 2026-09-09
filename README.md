@@ -22,6 +22,7 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 - ⭐ **Priority Levels** - Mark items as High, Medium, or Low priority
 - 📝 **Details & Links** - Add notes like size, color, links (automatically clickable!), or preferences
 - ✓ **Mark as Purchased** - Track when gifts have been bought
+- ❓ **Ask for More Info (Anonymous)** - Vague item on someone's list? Ask them to add details without revealing you asked. The owner sees a reminder banner and a badge on that item; nobody — including the owner — can see who asked. The reminder stays until they actually update the item, and the "×" only hides the banner for 24 hours (a new request from someone else brings it back).
 
 ### The Magic: Gift Surprise Preservation 🎁
 - 🎁 **Recipients Can't See Claims** - When viewing YOUR OWN wishlist, you can't see:

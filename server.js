@@ -178,6 +178,33 @@ function sanitizeString(str, maxLength = 500) {
   return sanitized;
 }
 
+// Generate a stable id for a wishlist item (used to track anonymous info requests)
+function generateItemId() {
+  return require('crypto').randomBytes(9).toString('hex');
+}
+
+// Sanitize an anonymous "more info requested" marker on an item.
+// IMPORTANT: this never stores who asked. The whole group blob is served to every
+// member, so recording the requester anywhere in it would break anonymity.
+function sanitizeInfoRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return undefined;
+
+  const count = Number(request.count);
+  if (!Number.isFinite(count) || count < 1) return undefined;
+
+  const requestedAt = typeof request.lastRequestedAt === 'string' && validator.isISO8601(request.lastRequestedAt)
+    ? request.lastRequestedAt
+    : new Date().toISOString();
+
+  return {
+    count: Math.min(Math.floor(count), 99),
+    // Fingerprint of the item's info fields when the request was made, so the
+    // notification can clear itself once the owner actually changes the listing.
+    signature: sanitizeString(String(request.signature || ''), 64),
+    lastRequestedAt: requestedAt
+  };
+}
+
 // Helper function to validate and sanitize group data
 function validateGroupData(data) {
   const errors = [];
@@ -241,6 +268,11 @@ function validateGroupData(data) {
           if (item.claimedBy && !Array.isArray(item.claimedBy)) {
             errors.push(`claimedBy must be an array for user: ${username}`);
           }
+
+          if (item.infoRequest !== undefined && item.infoRequest !== null &&
+              (typeof item.infoRequest !== 'object' || Array.isArray(item.infoRequest))) {
+            errors.push(`infoRequest must be an object for user: ${username}`);
+          }
         }
       }
     }
@@ -272,6 +304,9 @@ function sanitizeGroupData(data) {
       sanitized.users[cleanUsername] = {
         items: Array.isArray(user.items) 
           ? user.items.slice(0, 100).map(item => ({
+              id: item.id && typeof item.id === 'string'
+                ? sanitizeString(item.id, 40) || generateItemId()
+                : generateItemId(),
               description: sanitizeString(item.description || item.item || item.name || '', 500),
               priority: item.priority && ['high', 'medium', 'low'].includes(item.priority) 
                 ? item.priority 
@@ -285,7 +320,8 @@ function sanitizeGroupData(data) {
               purchased: Boolean(item.purchased),
               splitWith: Array.isArray(item.splitWith)
                 ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
-                : []
+                : [],
+              infoRequest: sanitizeInfoRequest(item.infoRequest)
             }))
           : []
       };
