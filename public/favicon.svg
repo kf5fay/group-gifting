@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ComeGiftIt">
+  <rect width="64" height="64" rx="14" fill="#c41e3a"/>
+  <rect x="11" y="26" width="42" height="27" rx="3" fill="#ffffff"/>
+  <rect x="9" y="19" width="46" height="10" rx="3" fill="#f4f4f4"/>
+  <rect x="29" y="19" width="6" height="34" fill="#165b33"/>
+  <rect x="9" y="34" width="46" height="5" fill="#165b33"/>
+  <path d="M32 19c-4-8-14-7-14-1 0 3 4 4 7 4h7zM32 19c4-8 14-7 14-1 0 3-4 4-7 4h-7z" fill="#165b33"/>
+</svg>

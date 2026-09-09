@@ -37,8 +37,10 @@ app.use(helmet({
 // JSON parsing with size limit
 app.use(express.json({ limit: '1mb' }));
 
-// Serve static files
-app.use(express.static(__dirname));
+// Serve static files from public/ only.
+// Serving __dirname published server.js, package.json and env.template to
+// anyone who guessed the filename.
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Rate limiting - General protection
 const generalLimiter = rateLimit({
@@ -48,6 +50,13 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// NOTE (remediation brief 1.11): these limits are keyed on IP, so a household
+// behind one public IP shares them -- roughly 16 concurrent pollers exhaust the
+// read limit, and 30 writes/min is shared across everyone on that network.
+// The fix is to key on the member token where present and fall back to IP, plus
+// a higher write ceiling for token-identified callers. That needs the member
+// tokens introduced in Phase 2 and is deliberately not attempted before then.
 
 // Lenient rate limit for GET requests (read operations)
 const readLimiter = rateLimit({
@@ -162,20 +171,20 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// Helper function to sanitize strings
+// Helper function to normalise strings for storage.
+//
+// This deliberately does NOT strip HTML tags or quote characters. It used to,
+// and that silently corrupted ordinary text: "Levi's 501" became "Levis 501",
+// 5'10" became 510, "O'Brien" became "OBrien". Stripping on input was also the
+// wrong layer -- it bought no safety. Text is now stored raw and escaped at
+// render time instead: index.html routes every stored string through
+// escapeHtml(), escapeJsAttr() or linkifyText() before it reaches innerHTML.
+// That is the only layer of defence now, so it must stay complete.
 function sanitizeString(str, maxLength = 500) {
   if (typeof str !== 'string') return '';
 
-  // Remove any HTML tags and scripts
-  let sanitized = str.replace(/<[^>]*>/g, '');
-
-  // Remove potentially dangerous characters
-  sanitized = sanitized.replace(/[<>\"\']/g, '');
-
-  // Trim and limit length
-  sanitized = sanitized.trim().substring(0, maxLength);
-
-  return sanitized;
+  // Trim and limit length. Nothing else -- store what the user actually typed.
+  return str.trim().substring(0, maxLength);
 }
 
 // Generate a stable id for a wishlist item (used to track anonymous info requests)
@@ -304,8 +313,12 @@ function sanitizeGroupData(data) {
       sanitized.users[cleanUsername] = {
         items: Array.isArray(user.items) 
           ? user.items.slice(0, 100).map(item => ({
-              id: item.id && typeof item.id === 'string'
-                ? sanitizeString(item.id, 40) || generateItemId()
+              // Item ids are machine-generated identifiers, not user prose.
+              // sanitizeString no longer strips characters, so validate the
+              // charset here instead of relying on it. Accepts both the legacy
+              // hex ids and the UUIDs the client now generates.
+              id: typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,40}$/.test(item.id.trim())
+                ? item.id.trim()
                 : generateItemId(),
               description: sanitizeString(item.description || item.item || item.name || '', 500),
               priority: item.priority && ['high', 'medium', 'low'].includes(item.priority) 
@@ -724,11 +737,20 @@ app.put('/admin/api/contacts/:id', requireAdmin, async (req, res) => {
 // Manual cleanup trigger
 app.post('/admin/api/cleanup', requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query(
+    const groupsResult = await pool.query(
       "DELETE FROM groups WHERE updated_at < NOW() - INTERVAL '2 years'"
     );
-    console.log(`🧹 Admin triggered cleanup: ${result.rowCount} groups deleted`);
-    res.json({ success: true, deletedCount: result.rowCount });
+    // Contact submissions hold names, emails and message bodies. Retain for
+    // 12 months, matching the two-year rule on groups.
+    const contactsResult = await pool.query(
+      "DELETE FROM contact_submissions WHERE submitted_at < NOW() - INTERVAL '12 months'"
+    );
+    console.log(`🧹 Admin triggered cleanup: ${groupsResult.rowCount} groups, ${contactsResult.rowCount} contact submissions deleted`);
+    res.json({
+      success: true,
+      deletedCount: groupsResult.rowCount,
+      deletedContactCount: contactsResult.rowCount
+    });
   } catch (error) {
     console.error('Error running cleanup:', error);
     res.status(500).json({ success: false, message: 'Error running cleanup' });
@@ -737,13 +759,13 @@ app.post('/admin/api/cleanup', requireAdmin, async (req, res) => {
 
 // Serve admin page
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 // ===== END ADMIN ENDPOINTS =====
 
-// Cleanup old groups (optional - runs once when server starts)
-async function cleanupOldGroups() {
+// Cleanup old data (optional - runs once when server starts)
+async function cleanupOldData() {
   try {
     // Delete groups older than 2 years
     const result = await pool.query(
@@ -755,10 +777,23 @@ async function cleanupOldGroups() {
   } catch (error) {
     console.error('Error cleaning up old groups:', error);
   }
+
+  try {
+    // Delete contact submissions older than 12 months. These hold names,
+    // emails and message bodies and previously grew forever.
+    const result = await pool.query(
+      "DELETE FROM contact_submissions WHERE submitted_at < NOW() - INTERVAL '12 months'"
+    );
+    if (result.rowCount > 0) {
+      console.log(`✅ Cleaned up ${result.rowCount} old contact submissions`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up old contact submissions:', error);
+  }
 }
 
 // Run cleanup on startup
-cleanupOldGroups();
+cleanupOldData();
 
 // Redirect old filename to new filename (backward compatibility)
 app.get('/christmas-gift-exchange.html', (req, res) => {
@@ -774,7 +809,7 @@ app.listen(PORT, () => {
   console.log(`\n🎄 ComeGiftIt - Gift Exchange App`);
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`✅ Security features enabled`);
-  console.log(`✅ Data retention: 2 years`);
+  console.log(`✅ Data retention: groups 2 years, contact submissions 12 months`);
   console.log(`⚠️  Contact form logs to console (email not configured)`);
 });
 
