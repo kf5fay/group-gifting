@@ -4,6 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ComeGiftIt - Holiday Gifting Without the Chaos</title>
+    <meta name="description" content="Free gift exchange coordinator. Create a group, share one link, and everyone adds their wishlist. Claim gifts without the recipient ever seeing. No accounts, no passwords.">
+
+    <!-- Social sharing. The app is distributed entirely by people pasting the
+         link into a chat, so these tags are the app's front door. -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="ComeGiftIt">
+    <meta property="og:title" content="ComeGiftIt - Holiday Gifting Without the Chaos">
+    <meta property="og:description" content="Create a group, share one link, and everyone adds their wishlist. Claim gifts without the recipient ever seeing. No accounts, no passwords.">
+    <meta property="og:url" content="https://comegiftit.com/">
+    <meta property="og:image" content="https://comegiftit.com/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="ComeGiftIt - holiday gifting without the chaos">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ComeGiftIt - Holiday Gifting Without the Chaos">
+    <meta name="twitter:description" content="Create a group, share one link, and everyone adds their wishlist. Claim gifts without the recipient ever seeing. No accounts, no passwords.">
+    <meta name="twitter:image" content="https://comegiftit.com/og-image.png">
+    <meta name="twitter:image:alt" content="ComeGiftIt - holiday gifting without the chaos">
+
+    <!-- og-image.png and apple-touch-icon.png are generated branded
+         placeholders. Replace them with real artwork before launch. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <style>
         * {
             margin: 0;
@@ -567,6 +591,56 @@
             border: 1px solid #f5576c;
         }
 
+        /* Non-blocking toast for writes the server rejected. Fixed to the
+           viewport so it is visible from any screen without moving content. */
+        .save-error-toast {
+            display: none;
+            position: fixed;
+            left: 50%;
+            bottom: 20px;
+            transform: translateX(-50%);
+            z-index: 2000;
+            max-width: 90vw;
+            width: 420px;
+            padding: 14px 44px 14px 16px;
+            border-radius: 10px;
+            background: #ffe5e5;
+            color: #a3253c;
+            border: 1px solid #f5576c;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+            font-size: 14px;
+            line-height: 1.45;
+            text-align: left;
+        }
+
+        .save-error-toast.show {
+            display: block;
+        }
+
+        .save-error-toast strong {
+            display: block;
+            margin-bottom: 3px;
+        }
+
+        .save-error-toast .save-error-dismiss {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+            font-size: 17px;
+            font-weight: 700;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            background: rgba(245, 87, 108, 0.18) !important;
+            color: #a3253c !important;
+            box-shadow: none;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .wishlists-grid {
@@ -765,7 +839,7 @@
             </p>
             <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
                 <p style="font-size: 14px; color: #666;">
-                    <strong>🔒 Privacy:</strong> No accounts needed, no emails collected. Your group data is stored securely for 2 years, then automatically deleted.
+                    <strong>🔒 Privacy:</strong> No accounts needed and no email required to use the app. Your group data is stored for 2 years, then automatically deleted. If you write to us through the contact form, we store the name, email address and message you send there, and delete those after 12 months.
                 </p>
             </div>
         </div>
@@ -796,7 +870,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Can the gift recipient see who claimed their items?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    No! That's the magic. When you claim someone's gift, they wont see anything at all. The surprise is safe!
+                    ComeGiftIt never shows you who claimed your own gifts — your list looks exactly the same to you whether or not anything's been claimed. Everyone else in the group can see what's already taken, so nobody doubles up.
                 </p>
             </div>
 
@@ -824,7 +898,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">What about security?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    The app has enterprise-grade security including rate limiting, input validation, and XSS protection. Your data is safe!
+                    Concretely: traffic is served over HTTPS, requests are rate limited, input is validated and length limited, everything you type is escaped before it's displayed, and there are no accounts or passwords to steal. Groups are deleted automatically after two years. Anyone who has your group's link can open the group, so only share it with the people you want in it.
                 </p>
             </div>
         </div>
@@ -926,6 +1000,14 @@
         <p style="font-size: 12px; color: #999; margin-top: 5px;">
             Free • No Ads • No Account Required • Data Retained for 2 Years
         </p>
+    </div>
+
+    <!-- Save-failure notice. saveData() used to swallow rejected writes into
+         console.error, leaving a UI that looked like it had worked. -->
+    <div id="saveErrorToast" class="save-error-toast" role="alert" aria-live="assertive">
+        <button class="save-error-dismiss" onclick="hideSaveError()" title="Dismiss">&times;</button>
+        <strong>Your change wasn't saved</strong>
+        <span id="saveErrorToastText">Something went wrong saving to the server. Please try again.</span>
     </div>
 
     <script>
@@ -1513,7 +1595,7 @@
                 html += `
                     <div style="margin-top: 25px; padding: 15px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 10px; text-align: center;">
                         <p style="color: white; font-weight: 600; margin: 0;">
-                            📝 Send thank you cards to: ${Array.from(uniqueBuyers).join(', ')}
+                            📝 Send thank you cards to: ${escapeHtml(Array.from(uniqueBuyers).join(', '))}
                         </p>
                     </div>
                 `;
@@ -1574,11 +1656,11 @@
 
                 let html = `
                     <div class="wishlist-header">
-                        <h3>${username} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
+                        <h3>${escapeHtml(username)} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
                             ${!window.isObserverMode && currentUser === groupData.createdBy && username !== currentUser ?
-                                `<button onclick="deleteUser('${username}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>`
+                                `<button onclick="deleteUser('${escapeJsAttr(username)}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>`
                                 : ''}
                         </div>
                     </div>
@@ -1686,7 +1768,7 @@
 
                             // Edit button - show for own items OR if you're the creator
                             if (canEdit) {
-                                html += `<button onclick="showEditItemModal('${username}', ${index})" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
+                                html += `<button onclick="showEditItemModal('${escapeJsAttr(username)}', ${index})" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
                             }
 
                             // Gift coordination buttons (only show for others' wishlists)
@@ -1695,17 +1777,17 @@
                                 if (hasRequestedInfo(username, item)) {
                                     html += `<button disabled style="background: #e0e0e0 !important; color: #777 !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0; box-shadow: none; cursor: default;" title="You already asked for more info on this item">✓ Info Requested</button>`;
                                 } else {
-                                    html += `<button onclick="requestMoreInfo('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Anonymously ask for more details - they won't know it was you">❓ Ask for More Info</button>`;
+                                    html += `<button onclick="requestMoreInfo('${escapeJsAttr(username)}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Anonymously ask for more details - they won't know it was you">❓ Ask for More Info</button>`;
                                 }
 
                                 if (!isPurchased) {
                                     if (claimedByMe) {
-                                        html += `<button onclick="unclaimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
-                                        html += `<button onclick="markPurchased('${username}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
+                                        html += `<button onclick="unclaimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
+                                        html += `<button onclick="markPurchased('${escapeJsAttr(username)}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
                                     } else if (!isClaimed) {
-                                        html += `<button onclick="claimItem('${username}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
+                                        html += `<button onclick="claimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
                                     } else {
-                                        html += `<button onclick="splitGift('${username}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
+                                        html += `<button onclick="splitGift('${escapeJsAttr(username)}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
                                     }
                                 }
                             }
@@ -1727,7 +1809,7 @@
 
                         // Show who claimed (but NOT to the gift recipient)
                         if (!isOwnWishlist && isClaimed) {
-                            html += `<div class="item-meta" style="margin-top: 5px; color: #2ecc71;">✓ Claimed by: ${item.claimedBy.join(', ')}</div>`;
+                            html += `<div class="item-meta" style="margin-top: 5px; color: #2ecc71;">✓ Claimed by: ${escapeHtml(item.claimedBy.join(', '))}</div>`;
                         }
 
                         html += '</div>';
@@ -1737,7 +1819,7 @@
                     if (buttonText) {
                         html += `
                             <div style="text-align: center; margin-top: 15px;">
-                                <button onclick="toggleWishlist('${username}')" style="
+                                <button onclick="toggleWishlist('${escapeJsAttr(username)}')" style="
                                     background: transparent !important;
                                     color: var(--primary-color) !important;
                                     border: 2px solid var(--primary-color);
@@ -2234,7 +2316,47 @@
             window.location.href = `mailto:?subject=${subject}&body=${body}`;
         }
 
+        // Save-failure notice
+        // ------------------------------------------------------------
+        // A rejected write used to disappear into console.error, so the user
+        // saw a UI that looked like it had worked while the server had kept
+        // nothing. Surface it instead, without blocking what they are doing.
+        let saveErrorTimer = null;
+
+        function showSaveError(detail) {
+            const toast = document.getElementById('saveErrorToast');
+            const text = document.getElementById('saveErrorToastText');
+            if (!toast || !text) return;
+
+            if (detail) {
+                // Server messages don't always end in punctuation.
+                const reason = /[.!?]$/.test(detail) ? detail : detail + '.';
+                text.textContent = `${reason} Your change was not saved — please try again.`;
+            } else {
+                text.textContent = 'We could not save your change. Please check your connection and try again.';
+            }
+
+            toast.classList.add('show');
+
+            // Auto-hide after a while so it does not sit there forever, but
+            // long enough to actually be read.
+            if (saveErrorTimer) clearTimeout(saveErrorTimer);
+            saveErrorTimer = setTimeout(hideSaveError, 12000);
+        }
+
+        function hideSaveError() {
+            const toast = document.getElementById('saveErrorToast');
+            if (toast) toast.classList.remove('show');
+            if (saveErrorTimer) {
+                clearTimeout(saveErrorTimer);
+                saveErrorTimer = null;
+            }
+        }
+
         // Save Data
+        // Returns true if the server accepted the write, false otherwise.
+        // Callers may ignore the result; a failure is always surfaced to the
+        // user by showSaveError() regardless.
         async function saveData() {
             try {
                 const response = await fetch(`/api/groups/${groupId}`, {
@@ -2245,16 +2367,32 @@
                     body: JSON.stringify(groupData)
                 });
 
-                const result = await response.json();
-                
-                if (!result.success) {
-                    console.error('Error saving data:', result.message);
-                    if (result.errors) {
+                let result = null;
+                try {
+                    result = await response.json();
+                } catch (parseError) {
+                    // Rate limiters and proxies can answer with a non-JSON body.
+                    result = null;
+                }
+
+                if (!response.ok || !result || !result.success) {
+                    const message = (result && result.message)
+                        ? result.message
+                        : `The server rejected the change (HTTP ${response.status}).`;
+                    console.error('Error saving data:', message);
+                    if (result && result.errors) {
                         console.error('Validation errors:', result.errors);
                     }
+                    showSaveError(message);
+                    return false;
                 }
+
+                hideSaveError();
+                return true;
             } catch (error) {
                 console.error('Error saving data:', error);
+                showSaveError('We could not reach the server.');
+                return false;
             }
         }
 
@@ -2298,21 +2436,63 @@
         }
 
         // Utility Functions
+        // Group IDs are the only thing protecting a group, so they must be
+        // unguessable. Math.random() is not cryptographically secure (V8's
+        // generator state is recoverable from a handful of outputs) and
+        // substring(2, 15) produced variable-length, occasionally short IDs.
+        // Legacy short IDs still resolve -- the server's validation is
+        // unchanged and accepts both.
         function generateId() {
-            return Math.random().toString(36).substring(2, 15);
+            // randomUUID() is only exposed in a secure context (https, or
+            // localhost). Production is https, but fall back to getRandomValues
+            // -- which has no such restriction -- so a dev box reached over
+            // plain http on a LAN address can still create groups.
+            if (crypto.randomUUID) return crypto.randomUUID();
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
         }
 
+        // Escape for HTML. Quotes are escaped too, so this is safe in an
+        // attribute value as well as in text content. The server no longer
+        // strips characters from stored text, so this is the only layer of
+        // defence -- every stored string must pass through here, escapeJsAttr()
+        // or linkifyText() before it reaches innerHTML.
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            if (text === null || text === undefined) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Escape for a single-quoted JS string literal that itself sits inside
+        // an HTML attribute, e.g. onclick="doThing('...')". Order matters:
+        // escape for JS first, then for HTML, so that the browser's attribute
+        // decoding hands the JS parser exactly the characters we intended.
+        // Without this, a name like O'Brien breaks out of the string literal.
+        function escapeJsAttr(text) {
+            if (text === null || text === undefined) return '';
+            return escapeHtml(
+                String(text)
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'")
+                    .replace(/"/g, '\\"')
+                    .replace(/\r/g, '\\r')
+                    .replace(/\n/g, '\\n')
+            );
         }
 
         // Convert URLs in text to clickable links
         function linkifyText(text) {
             if (!text) return '';
             
-            // Escape HTML first for security
+            // Escape HTML first for security. escapeHtml() escapes quotes too,
+            // which matters here: cleanUrl below is interpolated into an
+            // href="..." attribute, and the URL pattern happily matches a
+            // quote character. Without quote escaping, a URL containing a
+            // double quote would break out of the attribute.
             const escaped = escapeHtml(text);
             
             // Regular expression to match URLs

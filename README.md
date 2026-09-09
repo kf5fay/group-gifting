@@ -1,5 +1,7 @@
 # 🎄 ComeGiftIt - Holiday Gift Exchange App
 
+**Live at https://comegiftit.com**
+
 A festive web app for organizing gift exchanges with family and friends. Each group gets a unique shareable link, and members can add wishlists, claim gifts, and coordinate purchases—all while preserving the surprise of who's getting what!
 
 ## ✨ Features
@@ -50,9 +52,9 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 
 ### Security & Privacy
 - 🔒 **No Accounts Required** - No passwords, no email verification
-- 🛡️ **Enterprise-Grade Security** - Helmet, rate limiting, input validation, XSS protection
+- 🛡️ **Security Basics** - HTTPS, Helmet security headers, rate limiting, input validation, output escaping
 - 🗄️ **PostgreSQL Database** - Reliable, scalable data storage
-- 🕐 **2-Year Data Retention** - Groups automatically deleted after 2 years
+- 🕐 **Data Retention** - Groups automatically deleted after 2 years; contact form submissions after 12 months
 - 📧 **Contact Form** - Built-in feedback system via Web3Forms
 
 ## 🔐 Admin Dashboard
@@ -115,12 +117,17 @@ The observer mode is a powerful feature that lets you debug user issues without 
 The app includes a contact form that uses Web3Forms (free service):
 1. Sign up at https://web3forms.com
 2. Get your access key
-3. Replace the access key in `index.html` (search for "access_key")
+3. Replace the access key in `public/index.html` (search for "access_key")
 
 ### Files Included for Deployment
-- `index.html` - Main application (single-page app)
+- `public/index.html` - Main application (single-page app)
+- `public/admin.html` - Admin dashboard
+- `public/og-image.png`, `public/favicon.svg`, `public/apple-touch-icon.png` - Social preview image and icons (generated placeholders — replace with real artwork)
 - `server.js` - Express server with PostgreSQL
-- `package.json` - Node.js dependencies
+- `package.json` / `package-lock.json` - Node.js dependencies
+
+Only `public/` is served statically. `server.js`, `package.json` and
+`env.template` sit outside it and are not reachable over HTTP.
 
 ## 💻 Local Development
 
@@ -241,9 +248,9 @@ CREATE TABLE contact_submissions (
 
 ### URL Structure
 ```
-https://comegiftit.up.railway.app/#abc123xyz
-                                  ↑
-                           Unique Group ID
+https://comegiftit.com/#abc123xyz
+                       ↑
+                Unique Group ID
 ```
 
 ### API Endpoints
@@ -277,12 +284,16 @@ https://comegiftit.up.railway.app/#abc123xyz
 - **Polling**: Updates every 10 seconds
 
 ### Security Features
-- Helmet.js for security headers
-- Input validation and sanitization
-- XSS protection
-- SQL injection prevention
+- Helmet.js for security headers, including a Content Security Policy
+- Input validation and length limits on all stored fields
+- Output escaping at render time (stored text is never trusted as HTML)
+- Parameterised SQL queries
 - Rate limiting on all endpoints
-- No sensitive data stored
+- No accounts or passwords
+- Static files served only from `public/`
+
+Known limitation: anyone holding a group's link can open that group. Share
+group links only with the people you want in the group.
 
 ### Browser Compatibility
 - Modern browsers (Chrome, Firefox, Safari, Edge)
@@ -331,13 +342,9 @@ Want to customize? Here are some ideas:
 - If creating many groups, you're limited to 10/hour
 
 **Q: Contact form not working?**
-- Verify Web3Forms access key is configured in `index.html`
+- Verify Web3Forms access key is configured in `public/index.html`
 - Check browser console for errors
 - Rate limit: 3 submissions per hour
-
-## 📝 License
-
-Free to use and modify for personal or commercial purposes!
 
 ## 🎁 Future Enhancement Ideas
 
