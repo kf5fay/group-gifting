@@ -44,7 +44,9 @@ These were settled in review. Do not re-litigate them; if something turns out to
 | Question | Decision |
 |---|---|
 | Identity model | Per-device member tokens. Multiple devices per member. No passwords in the normal flow. |
-| Second device claiming an existing name | Approve-on-first-device, with an optional PIN as fallback |
+| Second device claiming an existing name | Trust-based. Prompt "is this you?" and issue a token on confirmation. |
+| PINs, approval flows, recovery codes, lockout recovery | **Not built.** Nobody can be locked out, so none of it is needed. |
+| Destructive creator actions | Reset Group is soft-deleted with a 30-day undo *and* a typed confirmation. |
 | Anyone can join under a brand-new name and see all claims | **Accepted as a known limitation.** Do not build join gating. Fix the marketing copy instead. |
 | Concurrency | Granular action endpoints (server merges), plus optimistic locking for remaining blob writes |
 | Splitting a claimed gift | Request/accept only. Unilateral splitting is removed. |
@@ -166,16 +168,28 @@ The current limits are per-IP. A family on one home network shares a public IP. 
 
 ## 5. Phase 2 — Member identity
 
+### 5.0 Design principle
+
+**Identity is claimed on trust, not proven.** This is a family app. Anyone who already has the group link is someone the creator invited, and the group polices itself socially. The server needs to know *who you are* so it can filter your own claim data (Phase 3) and tell two people named John apart — not to defend members against each other.
+
+Consequently there is **no approval flow, no PIN, no recovery code, and no lockout recovery mechanism**, because nobody can ever be locked out. Do not build any of these.
+
+Impersonation gains an attacker nothing on the surprise front: claiming Mary's name shows you *Mary's* filtered view, which hides claims on Mary's items. You would learn less than by joining under a fresh name, which is possible anyway (section 6.5).
+
+The one place trust is not safe is destructive creator actions, handled in 5.7.
+
 ### 5.1 Model
 
 - Each **member** belongs to a group and is identified by their display name within that group.
 - Each member holds **one or more device tokens**. One row per device.
 - Tokens are random 32-byte hex values, generated server-side, returned once, and stored **hashed** (SHA-256 is sufficient; these are high-entropy random values, not passwords).
 - Tokens are sent on every authenticated request in an `X-Member-Token` header. **Never in a query string** — query strings end up in server logs and referrer headers.
+- Tokens do not expire. Groups live two years; forced re-auth would be worse than the risk.
+- Cap at **5 active devices per member**. Beyond that, evict the oldest by `last_seen_at`.
 
 ### 5.2 Critical storage constraint
 
-**Token hashes and PIN hashes must never enter the `groups.data` JSONB blob.**
+**Token hashes must never enter the `groups.data` JSONB blob.**
 
 The entire blob is serialized to every member on every poll. Anything stored there is public to the group. This is the same trap the existing `sanitizeInfoRequest()` comment in `server.js` correctly identifies for the anonymous info-request feature — apply the same reasoning here.
 
@@ -187,8 +201,7 @@ CREATE TABLE group_members (
   group_id      VARCHAR(255) NOT NULL REFERENCES groups(group_id) ON DELETE CASCADE,
   member_name   VARCHAR(100) NOT NULL,
   token_hash    CHAR(64) NOT NULL,
-  pin_hash      TEXT,
-  status        VARCHAR(20) NOT NULL DEFAULT 'active',  -- 'active' | 'pending'
+  is_creator    BOOLEAN NOT NULL DEFAULT FALSE,
   device_label  VARCHAR(100),
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_seen_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -199,12 +212,13 @@ CREATE INDEX ON group_members (group_id, member_name);
 ```
 
 Notes:
-- Multiple `active` rows per `(group_id, member_name)` = multiple devices for one person.
-- A `pending` row is an unapproved device request.
-- `pin_hash` is per member, not per device. Store the same hash on each of that member's rows, or normalise into a separate `group_member_pins` table — implementer's choice, but keep it out of the blob either way.
-- `device_label` is for the approval prompt. Derive something human-readable from the User-Agent ("Chrome on Windows"). Do not store the raw UA string.
-- `ON DELETE CASCADE` means the existing group-deletion and cleanup paths clean up members automatically. Verify this.
-- The `groups` table needs a `version INTEGER NOT NULL DEFAULT 1` column for Phase 4. Add it in the same migration.
+- Multiple rows per `(group_id, member_name)` = multiple devices for one person.
+- `device_label` is shown in the member list so a family can see when a new device joins. Derive something human-readable from the User-Agent ("Chrome on Windows"). Do not store the raw UA string.
+- `ON DELETE CASCADE` means existing group-deletion and cleanup paths clean up members automatically. Verify this.
+
+Also add in the same migration:
+- `groups.version INTEGER NOT NULL DEFAULT 1` — needed for Phase 4.
+- `groups.deleted_at TIMESTAMP NULL` — needed for 5.7.
 
 Follow the existing migration style in `server.js` — idempotent `CREATE TABLE IF NOT EXISTS` and guarded `ALTER TABLE` blocks that run at startup.
 
@@ -213,59 +227,35 @@ Follow the existing migration style in `server.js` — idempotent `CREATE TABLE 
 `POST /api/groups/:groupId/join` with `{ name }`.
 
 1. Reject if the name fails validation (non-empty, ≤100 chars after trim).
-2. Look up `active` rows for `(group_id, name)`.
-3. **No active rows** — the name is free. Create an `active` row, return `{ status: 'joined', token }`. If the group has no `createdBy`, set it to this member.
-4. **Active rows exist** — the name is taken by another device. Create a `pending` row, return `{ status: 'pending_approval', pendingId }`. The new device polls for approval. Do not return a token.
-5. If the group has a PIN set for that member and the client supplied a correct one, skip the pending state and issue a token immediately.
+2. Look up existing rows for `(group_id, name)`.
+3. **No rows** — the name is free. Create a row, return `{ status: 'joined', token }`. If the group has no `createdBy`, set it and mark this row `is_creator = TRUE`.
+4. **Rows exist** — return `{ status: 'name_taken', itemCount, joinedAt }` and no token. The client shows the disambiguation prompt (5.4).
+5. `POST .../join` with `{ name, confirmExisting: true }` issues an additional token for that member, subject to the 5-device cap.
 
-### 5.4 Device approval flow
+### 5.4 The disambiguation prompt
 
-The approving device already polls every 10 seconds. Reuse that.
+When a name is taken, the frontend asks a plain question:
 
-- The **filtered group response** (Phase 3) includes, *for the requesting member only*, a `pendingDevices` array: `[{ pendingId, deviceLabel, requestedAt }]`. Because it is injected per-viewer, no other member ever sees it.
-- The frontend shows a modal on the existing device: *"A new device wants to join as John. Was this you?"* with Approve and Deny.
-- `POST /api/groups/:groupId/devices/:pendingId/approve` — requires an active token for that member. Flips the row to `active` and generates its token.
-- `POST /api/groups/:groupId/devices/:pendingId/deny` — deletes the row.
-- The waiting device polls `GET /api/groups/:groupId/devices/:pendingId` until it returns a token or a denial.
-- Expire pending rows after 15 minutes.
-- Rate-limit pending creation hard — 5 per group per hour — so this cannot be used to spam a member with modals.
+> **John already has a list here.**
+> 13 items · joined Nov 3
+>
+> [ That's me — this is another device ]  [ I'm a different John ]
 
-### 5.5 PIN fallback
+Requirements:
+- Show **item count and join date only. Never show item names.** A stranger must not be able to read a wishlist from the join screen.
+- Both buttons get equal visual weight. The two-real-Johns case is the one this exists to catch, and people click the larger button.
+- "I'm a different John" returns to the name field with a suggested alternative pre-filled (`John B.`), which the user can edit.
 
-For when the original device is gone, wiped, or unreachable.
-
-- Optional. Never required to join. Do not prompt for it during the normal join flow.
-- Offer it in settings after joining: "Set a PIN so you can get back in from another device."
-- 4–6 digits, hashed with bcrypt or scrypt (this one *is* a low-entropy secret and needs a slow hash).
-- On the join screen, when a name is taken, offer "Use my PIN instead" alongside the approval wait.
-- Rate-limit PIN attempts: 5 per 15 minutes per group+name.
-
-### 5.6 Creator recovery code
-
-The creator has nobody to approve them, so they need a self-service path.
-
-- At group creation, generate a recovery code, display it once with a "save this" prompt, store only its hash.
-- `POST /api/groups/:groupId/recover` with the code issues a fresh creator token.
-- Rate-limit: 5 attempts per hour.
-
-### 5.7 Creator releasing a member slot
-
-For a member locked out with no PIN and no working device.
-
-- `DELETE /api/groups/:groupId/members/:name/devices` — creator token required.
-- Deletes all device rows for that member. Their wishlist data is untouched.
-- The next browser to join under that name takes the slot fresh.
-- Distinct from the existing "remove user" action, which deletes the member and their items.
-
-### 5.8 Server-side authorization
+### 5.5 Server-side authorization
 
 Replace the browser-side `if (currentUser !== groupData.createdBy)` checks with real server checks. Keep the client-side ones for UX — they hide buttons — but the server is now the enforcer.
 
-Creator-token-only operations:
-- Reset group (`DELETE /api/groups/:groupId`)
+**Authorize on the `is_creator` flag, not on a name match.** String-matching a display name is fragile: it breaks if a name is edited, and it depends on data living in the blob that everyone can see. Keep `createdBy` in the blob for display only; stop authorizing on it.
+
+Creator-only operations:
+- Reset group
 - Remove a user
 - Edit another member's item
-- Release a member's devices
 - Change group settings (name, holiday, event date)
 
 Any authenticated member:
@@ -273,22 +263,62 @@ Any authenticated member:
 - Claim, unclaim, request split, respond to split, mark purchased on *others'* items
 - Request more info on others' items
 
+### 5.6 Member list transparency
+
+Since identity is trust-based, make it visible.
+
+- Show each member's device count in the member list, or a marker when a member has more than one device.
+- When a new device joins an existing member, surface it — a quiet line in the member list is enough. No modal.
+
+This is the enforcement mechanism in this design. It costs almost nothing.
+
+### 5.7 Make Reset Group non-destructive
+
+Because anyone can claim the creator's name, anyone can reach the reset button — most likely a confused relative who clicked "that's me" without understanding what they inherited. Trust is fine when the worst case is annoying; it is not fine when the worst case is permanent.
+
+Implement **both** guards:
+
+**Soft delete:**
+- Reset sets `groups.deleted_at` rather than deleting rows.
+- A soft-deleted group returns a "this group was reset" state to members, not a 404.
+- `POST /api/groups/:groupId/undo-reset` clears `deleted_at`. Available for 30 days, creator token required.
+- The existing cleanup job hard-deletes groups where `deleted_at` is more than 30 days old.
+- After a reset, show the acting user a persistent undo affordance, not a transient toast.
+- The two-year retention cleanup must not resurrect or skip soft-deleted groups — check both conditions.
+
+**Confirmation dialog:**
+- Require typing the group name to confirm.
+- State plainly what is about to happen and that it can be undone for 30 days.
+
+Remove User has the same shape with a smaller blast radius — a confirmation naming the person and their item count is sufficient there.
+
+### 5.8 Rate limiting
+
+This is deferred item 1.11, now possible.
+
+- Key rate limits on the member token where present, falling back to IP.
+- Raise the write ceiling for token-identified users.
+
+Current limits are per-IP, and a household shares one public IP. At 100 GET/min with each client polling every 10 seconds, roughly 16 people on one network exhaust the read limit — a plausible Christmas-morning scenario.
+
 ### 5.9 Migration
 
 Existing groups have members with no rows in `group_members`.
 
-- Treat any member with zero `active` rows as **unclaimed**. The first device to join under that name claims it, no approval needed. This is exactly the Phase 2 join flow, so no special-case code is required.
-- Returning users already hold `currentUsername` in localStorage. On load, if there is a stored username and no stored token, silently attempt a join with that name. For most returning users this succeeds invisibly and they notice nothing.
-- If it comes back `pending_approval`, someone else has already claimed the name. Show the approval-wait screen with an explanation.
-- **`createdBy` in legacy groups is just a string with no token behind it.** Until the creator's device claims their slot, no token can satisfy creator checks. Handle this: while a group has zero active member rows, allow the legacy client-side behaviour so the group is not bricked. Once any member has claimed a slot, enforce normally. Document this transitional window clearly in code comments.
+- Treat any member with zero rows as **unclaimed**. The first device to join under that name claims it. This is exactly the normal join flow, so no special-case code is needed.
+- Returning users already hold `currentUsername` in localStorage. On load, if there is a stored username and no stored token, silently attempt a join with that name. For most returning users this succeeds invisibly.
+- If it returns `name_taken`, show the 5.4 prompt.
+- **Legacy `createdBy` is a name string with no row behind it.** Enforce creator authority by token **only when the group's creator currently has at least one row in `group_members`.** If the creator has no rows, fall back to the legacy name check.
+
+  This must be evaluated **per check, not per group.** A rule like "enforce once any member has claimed a slot" would permanently lock a group where a non-creator returns but the creator never does. Document this in code comments.
+
+- When the creator's slot is first claimed, set `is_creator = TRUE` on that row.
 
 ### 5.10 Frontend storage
 
 - Store the token in localStorage keyed per group: `memberToken_<groupId>`. A user may be in several groups with different tokens.
 - Keep `currentUsername` for the migration path.
 - On a 401, clear the stored token and return the user to the join screen with a clear message rather than failing silently.
-
----
 
 ## 6. Phase 3 — Server-side claim filtering
 
@@ -306,7 +336,7 @@ Filter server-side, per viewer, using the Phase 2 token.
 - Deep-clone the blob before mutating. Do not modify the cached/queried object.
 - For every item belonging to the **requesting member**, strip: `claimedBy`, `purchased`, `splitWith`, `splitRequests`, and `infoRequest` metadata beyond what the owner is meant to see (the owner *does* see that info was requested — that is the existing intended behaviour — but must never see who asked).
 - Leave everything on other members' items intact.
-- Inject viewer-specific data: `pendingDevices` (5.4) and any split requests awaiting this member's response (Phase 4).
+- Inject viewer-specific data: any split requests awaiting this member's response (Phase 4).
 
 ### 6.3 Unauthenticated reads
 
@@ -420,12 +450,17 @@ Phase 1:
 - [ ] A rejected save produces a visible message
 
 Phase 2:
-- [ ] Join on device A, open the link on device B, approve on A, both devices work as the same member
-- [ ] Deny on A, and B is refused
-- [ ] Set a PIN on A, wipe A's storage, rejoin with the PIN, works without approval
+- [ ] Join on device A, open the link on device B, confirm "that's me", both devices work as the same member
+- [ ] Choosing "I'm a different John" produces a distinct member with an empty list
+- [ ] The disambiguation prompt shows an item count but no item names
+- [ ] A sixth device for one member evicts the least recently seen
 - [ ] A non-creator token calling reset-group gets 403
+- [ ] Reset requires typing the group name, and undo restores the group within 30 days
+- [ ] A soft-deleted group is hard-deleted by the cleanup job after 30 days, and is not resurrected by the two-year retention rule
+- [ ] A legacy group whose creator never returns still allows creator actions via the name fallback
+- [ ] A legacy group whose creator *does* return enforces by token from then on
 - [ ] An existing pre-migration group opens and works for a returning user with no visible change
-- [ ] No token hash or PIN hash appears anywhere in a `GET /api/groups/:id` response
+- [ ] No token hash appears anywhere in a `GET /api/groups/:id` response
 
 Phase 3:
 - [ ] `GET /api/groups/:id` with no token returns metadata only, no items
@@ -451,6 +486,8 @@ Do not do these, even if they seem like obvious improvements:
 - WebSockets or server-sent events
 - Real user accounts, email verification, or password login
 - Join gating / allowed-name rosters (deliberately deferred)
+- PINs, passwords, device-approval flows, recovery codes, or any lockout-recovery mechanism (see 5.0)
+- Democratic creator transfer or admin creator reassignment — the lockout scenario they solved no longer exists
 - Email notifications
 - Redesigning the landing page (tracked separately as marketing work)
 - Any change to the theming, animation, or visual design
