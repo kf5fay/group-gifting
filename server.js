@@ -230,6 +230,16 @@ const databaseReady = pool.query(`
 }).then(() => {
   console.log('✅ Database migration completed (version + deleted_at columns)');
 
+  // A record of one-off data migrations, so they stop re-scanning the table on
+  // every restart. Schema changes above are guarded by their own IF NOT EXISTS
+  // checks and are cheap; a row-by-row data migration is not.
+  return pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name       VARCHAR(100) PRIMARY KEY,
+      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}).then(() => {
   return backfillItemIds();
 }).catch(err => {
   console.error('❌ Database initialization error:', err);
@@ -258,6 +268,8 @@ const databaseReady = pool.query(`
 // two-year retention sweep, and a migration must not make every group in the
 // table look freshly active.
 // ---------------------------------------------------------------
+const ITEM_ID_MIGRATION = 'backfill_item_ids_v1';
+
 async function backfillItemIds() {
   const BATCH_SIZE = 100;
   let cursor = '';
@@ -265,7 +277,19 @@ async function backfillItemIds() {
   let groupsChanged = 0;
   let idsAssigned = 0;
 
+  let hadErrors = false;
+
   try {
+    const done = await pool.query(
+      'SELECT 1 FROM schema_migrations WHERE name = $1',
+      [ITEM_ID_MIGRATION]
+    );
+    if (done.rowCount > 0) {
+      // Already run. Every write since has gone through sanitizeGroupData(),
+      // which mints and de-duplicates ids, so there is nothing left to find.
+      return;
+    }
+
     for (;;) {
       const page = await pool.query(
         'SELECT group_id FROM groups WHERE group_id > $1 ORDER BY group_id ASC LIMIT $2',
@@ -303,13 +327,25 @@ async function backfillItemIds() {
           }
         } catch (error) {
           // One unreadable row must not stop the migration for every other
-          // group. It will be retried on the next restart.
+          // group -- but it does mean the run is incomplete, so it is not
+          // marked done and will be retried on the next restart.
+          hadErrors = true;
           console.error(`Error backfilling item ids for group ${groupId}:`, error);
         }
       }
 
       cursor = page.rows[page.rows.length - 1].group_id;
     }
+
+    if (hadErrors) {
+      console.log(`⚠️  Item id backfill incomplete: ${idsAssigned} ids assigned, some groups failed -- will retry on next start`);
+      return;
+    }
+
+    await pool.query(
+      'INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+      [ITEM_ID_MIGRATION]
+    );
 
     if (groupsChanged > 0) {
       console.log(`✅ Item id backfill: ${idsAssigned} ids assigned across ${groupsChanged} of ${scanned} groups`);
@@ -601,7 +637,7 @@ async function hasCreatorAuthority(db, groupId, blob, member, actingName) {
 
 // Shape of the "this group was reset" response (brief 5.7): members get a
 // state, not a 404.
-function resetStatePayload(row) {
+function resetStatePayload(row, canUndo = false) {
   const deletedAt = new Date(row.deleted_at);
   const undoUntil = new Date(deletedAt.getTime() + UNDO_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   return {
@@ -609,7 +645,11 @@ function resetStatePayload(row) {
     groupName: row.data && row.data.groupName ? row.data.groupName : '',
     resetAt: deletedAt.toISOString(),
     undoAvailableUntil: undoUntil.toISOString(),
-    undoAvailable: Date.now() < undoUntil.getTime()
+    undoAvailable: Date.now() < undoUntil.getTime(),
+    // Whether the person reading this can actually press the button. Only the
+    // creator can undo, and offering everyone else a control that can only
+    // return 403 is just a worse way of saying no.
+    canUndo
   };
 }
 
@@ -650,6 +690,13 @@ function filterGroupForViewer(blob, viewerName) {
       PRIVATE_ITEM_FIELDS.forEach(field => { delete item[field]; });
     });
   }
+
+  // Retire lapsed split requests for display. This is the clone, so nothing is
+  // written here -- the next action on the item persists the same decision.
+  Object.values(view.users || {}).forEach(user => {
+    if (!user || !Array.isArray(user.items)) return;
+    user.items.forEach(item => pruneSplitRequests(item));
+  });
 
   return view;
 }
@@ -750,12 +797,20 @@ function reconcileClaimState(incoming, stored, writerName) {
         item.claimedBy = [];
         item.purchased = false;
         item.splitWith = [];
+        delete item.splitRequests;
         return;
       }
 
       const storedClaimedBy = claimNames(previous.claimedBy);
       const storedSplitWith = claimNames(previous.splitWith);
       const storedPurchased = Boolean(previous.purchased);
+
+      // Split requests only ever move through their own endpoints, so they are
+      // taken from storage for everyone. A whole-blob write can neither forge
+      // one nor drop one.
+      const storedRequests = splitRequestList(previous);
+      if (storedRequests.length > 0) item.splitRequests = storedRequests;
+      else delete item.splitRequests;
 
       if (isOwnList) {
         // The writer was never shown any of this, so whatever arrived is an
@@ -812,6 +867,75 @@ function scrubNamesFromClaims(blob, names) {
         item.splitWith = item.splitWith.filter(name => !removed.has(name));
       }
     });
+  });
+}
+
+// Gap 1, on the whole-blob write path.
+//
+// Until the granular endpoints existed, Phase 2 could only gate the two
+// destructive shapes of a blob write -- removing a member, and rewriting who
+// the creator is -- and everything else went through. That left any member able
+// to rename the group or rewrite, or delete, somebody else's wishlist item, by
+// posting a blob that said so.
+//
+// The rule now is the same one the granular handlers enforce: a write may only
+// change what its author is allowed to change. Anything else is taken from
+// storage rather than refused, because the callers that reach this are stale
+// tabs and hand-made requests, and quietly keeping the stored truth is a better
+// answer to both than a 403. The real client no longer edits anything through
+// this path.
+//
+// Runs AFTER the creator gate, so a non-creator's attempt to remove a member is
+// still an explicit 403 rather than being silently smoothed over.
+function enforceWriteAuthority(incoming, stored, writerName, isCreator) {
+  if (isCreator) return;
+
+  const storedUsers = (stored && stored.users) || {};
+
+  // Group settings belong to the creator.
+  if (typeof stored.groupName === 'string') incoming.groupName = stored.groupName;
+  if (typeof stored.holiday === 'string') incoming.holiday = stored.holiday;
+  if (stored.eventDate !== undefined) incoming.eventDate = stored.eventDate;
+  if (typeof stored.createdBy === 'string' && stored.createdBy) incoming.createdBy = stored.createdBy;
+
+  if (!incoming.users || typeof incoming.users !== 'object') incoming.users = {};
+
+  // A blob write cannot invent members. Joining is the only way in.
+  Object.keys(incoming.users).forEach(name => {
+    if (name !== writerName && !storedUsers[name]) delete incoming.users[name];
+  });
+
+  // Everyone else's list is rebuilt from storage: same items, same order, same
+  // text. The only things carried over from the incoming copy are the ones
+  // reconcileClaimState() has already decided this writer may move -- their own
+  // participation in a claim, and the anonymous info-request marker.
+  Object.entries(storedUsers).forEach(([ownerName, storedUser]) => {
+    if (ownerName === writerName) return;
+
+    const incomingUser = incoming.users[ownerName];
+    const reconciled = new Map();
+    if (incomingUser && Array.isArray(incomingUser.items)) {
+      incomingUser.items.forEach(item => {
+        if (item && typeof item.id === 'string') reconciled.set(item.id, item);
+      });
+    }
+
+    const items = (Array.isArray(storedUser.items) ? storedUser.items : []).map(storedItem => {
+      const rebuilt = Object.assign({}, storedItem);
+      const fromWriter = reconciled.get(storedItem.id);
+      if (!fromWriter) return rebuilt;
+
+      rebuilt.claimedBy = fromWriter.claimedBy;
+      rebuilt.purchased = fromWriter.purchased;
+      rebuilt.splitWith = fromWriter.splitWith;
+
+      if (fromWriter.infoRequest !== undefined) rebuilt.infoRequest = fromWriter.infoRequest;
+      else delete rebuilt.infoRequest;
+
+      return rebuilt;
+    });
+
+    incoming.users[ownerName] = { items };
   });
 }
 
@@ -981,6 +1105,28 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------
+// Every group response is scoped to one viewer: the same URL returns different
+// bodies to different members, because claim data on your own items is stripped
+// out. A shared cache keying on URL alone could therefore hand one member's
+// body to another, which would invert the whole of Phase 3.
+//
+// Express already emits body-derived ETags, so a conditional request from the
+// wrong viewer does not currently produce a 304. That is luck, not a design:
+// it holds only because the bodies happen to differ. These two headers make it
+// a rule -- no-store keeps shared caches from keeping the body at all, and Vary
+// says the token is part of the cache key for anything that ignores no-store.
+// Admin responses are unfiltered group data and get the same treatment.
+// ---------------------------------------------------------------
+function noSharedCaching(req, res, next) {
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Vary', 'X-Member-Token');
+  next();
+}
+
+app.use('/api/groups', noSharedCaching);
+app.use('/admin/api', noSharedCaching);
+
 // Run fn inside a transaction, handing it a dedicated client.
 async function withTransaction(fn) {
   const client = await pool.connect();
@@ -1028,7 +1174,12 @@ app.get('/api/groups/:groupId', readLimiter, async (req, res) => {
     // A soft-deleted group is a state, not a 404: members who still have the
     // link get told it was reset, and the creator gets an undo affordance.
     if (row.deleted_at) {
-      return res.json({ success: true, data: null, reset: resetStatePayload(row) });
+      const resetToken = readMemberToken(req);
+      const resetMember = resetToken ? await resolveMember(pool, groupId, resetToken) : null;
+      const canUndo = await hasCreatorAuthority(
+        pool, groupId, row.data || {}, resetMember, readActingName(req)
+      );
+      return res.json({ success: true, data: null, reset: resetStatePayload(row, canUndo) });
     }
 
     const token = readMemberToken(req);
@@ -1403,6 +1554,80 @@ function findItemById(blob, itemId) {
   return null;
 }
 
+// ---------------------------------------------------------------
+// Split requests (brief 7.4)
+// ---------------------------------------------------------------
+// Splitting used to be unilateral: you clicked a button and joined someone
+// else's claim whether they liked it or not. Now Bob asks and Mary answers.
+//
+// These live on the item, inside the blob, and are stripped for the item's
+// OWNER along with the rest of the claim data (PRIVATE_ITEM_FIELDS). Unlike
+// the anonymous info-request, the claimer *does* see who is asking -- Mary
+// needs to know it is Bob before she can decide.
+const SPLIT_REQUEST_TTL_DAYS = 30;
+const MAX_SPLIT_ATTEMPTS_PER_ITEM = 2;   // one ask, and one more after a decline
+
+function splitRequestList(item) {
+  return Array.isArray(item && item.splitRequests) ? item.splitRequests : [];
+}
+
+function sanitizeSplitRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+
+  const id = typeof request.id === 'string' && ITEM_ID_PATTERN.test(request.id.trim())
+    ? request.id.trim()
+    : null;
+  const from = sanitizeString(request.from, 100);
+  if (!id || !from) return null;
+
+  const status = ['pending', 'accepted', 'declined', 'expired'].includes(request.status)
+    ? request.status
+    : 'pending';
+
+  return {
+    id,
+    from,
+    to: sanitizeString(request.to, 100),
+    status,
+    requestedAt: typeof request.requestedAt === 'string' && validator.isISO8601(request.requestedAt)
+      ? request.requestedAt
+      : new Date().toISOString(),
+    // Set when the claimer answers, so the asker can be told once and then
+    // dismiss it.
+    respondedAt: typeof request.respondedAt === 'string' && validator.isISO8601(request.respondedAt)
+      ? request.respondedAt
+      : undefined
+  };
+}
+
+// Retire pending requests that can no longer be answered: too old, or the item
+// is no longer in a state where splitting means anything (brief 7.4). Returns
+// true when something changed, so callers know whether they need to write.
+//
+// Answered requests are kept. Bob has to be told he was declined, and the
+// attempt cap needs to remember the ask happened.
+function pruneSplitRequests(item, now = Date.now()) {
+  const requests = splitRequestList(item);
+  if (requests.length === 0) return false;
+
+  const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+  const noLongerSplittable = claimedBy.length === 0 || Boolean(item.purchased);
+  let changed = false;
+
+  requests.forEach(request => {
+    if (request.status !== 'pending') return;
+
+    const age = now - new Date(request.requestedAt).getTime();
+    if (noLongerSplittable || !(age < SPLIT_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000)) {
+      request.status = 'expired';
+      request.respondedAt = new Date(now).toISOString();
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 // Keep the claim fields well-formed. These handlers write into the stored blob
 // directly rather than through sanitizeGroupData(), so the normalising that
 // function would have done has to happen here.
@@ -1418,6 +1643,14 @@ function normalizeClaimFields(item) {
   // An item nobody is claiming cannot be purchased. Without this an unclaim
   // would leave a "PURCHASED" badge with no buyer behind it.
   if (item.claimedBy.length === 0) item.purchased = false;
+
+  const requests = splitRequestList(item)
+    .slice(0, 20)
+    .map(sanitizeSplitRequest)
+    .filter(Boolean);
+
+  if (requests.length > 0) item.splitRequests = requests;
+  else delete item.splitRequests;
 }
 
 // What an actor is told about an item after acting on it. Only ever returned
@@ -1428,24 +1661,24 @@ function claimStatePayload(item) {
     id: item.id,
     claimedBy: Array.isArray(item.claimedBy) ? item.claimedBy : [],
     purchased: Boolean(item.purchased),
-    splitWith: Array.isArray(item.splitWith) ? item.splitWith : []
+    splitWith: Array.isArray(item.splitWith) ? item.splitWith : [],
+    splitRequests: splitRequestList(item)
   };
 }
 
-// Shared scaffolding for the three handlers. `apply` receives the live item and
-// returns one of:
-//   { changed: true }                     -- write it
-//   { unchanged: true }                   -- already in the desired state
-//   { conflict: 'code', message: '...' }  -- somebody got there first (409)
-async function runItemAction(req, res, apply) {
+// Shared scaffolding for every granular write.
+//
+// Opens one transaction, locks the group row, resolves the caller, hands the
+// live blob to `handler`, and writes only if the handler says something
+// changed. Every write bumps groups.version and updated_at.
+//
+// `handler` returns { httpStatus, body } to answer without writing, or adds
+// `changed: true` to have the result persisted.
+async function runGroupMutation(req, res, handler) {
   const groupId = req.params.groupId;
-  const itemId = req.params.itemId;
 
   if (!isValidGroupId(groupId)) {
     return res.status(400).json({ success: false, message: 'Invalid group ID format' });
-  }
-  if (typeof itemId !== 'string' || !ITEM_ID_PATTERN.test(itemId)) {
-    return res.status(400).json({ success: false, message: 'Invalid item ID format' });
   }
 
   const token = readMemberToken(req);
@@ -1466,8 +1699,6 @@ async function runItemAction(req, res, apply) {
         return { httpStatus: 409, body: { success: false, code: 'group_reset', reset: resetStatePayload(row) } };
       }
 
-      // Any authenticated member may claim, unclaim and mark purchased on other
-      // people's items (brief 5.5). Membership is the whole check.
       const member = token ? await resolveMember(client, groupId, token) : null;
       if (!member) {
         return {
@@ -1481,60 +1712,15 @@ async function runItemAction(req, res, apply) {
       }
 
       const blob = row.data || {};
-      const found = findItemById(blob, itemId);
+      const outcome = await handler({ blob, member, client, groupId, row, req });
 
-      if (!found) {
-        // Deleted, or this client is looking at a copy of the group from before
-        // it was. Either way the answer is the same: re-read.
-        return {
-          httpStatus: 404,
-          body: {
-            success: false,
-            code: 'item_not_found',
-            message: 'That item is no longer on the list.'
-          }
-        };
+      // A response that writes nothing still reports where the group stands, so
+      // a client can tell an idempotent no-op from a stale view.
+      if (!outcome.changed) {
+        return Object.assign({ member }, outcome, {
+          body: Object.assign({}, outcome.body, { version: row.version })
+        });
       }
-
-      // Nobody coordinates gifts on their own list. Refusing here is also what
-      // keeps these endpoints from becoming a way to ask "is my own item
-      // claimed yet?" -- the question Phase 3 exists to refuse.
-      if (found.ownerName === member.member_name) {
-        return {
-          httpStatus: 403,
-          body: {
-            success: false,
-            code: 'own_item',
-            message: 'You cannot claim gifts on your own wishlist.'
-          }
-        };
-      }
-
-      const outcome = apply(found.item, member, req.body || {});
-
-      if (outcome.conflict) {
-        return {
-          httpStatus: 409,
-          body: {
-            success: false,
-            code: outcome.conflict,
-            message: outcome.message,
-            item: claimStatePayload(found.item),
-            version: row.version
-          }
-        };
-      }
-
-      if (outcome.unchanged) {
-        // Idempotent: a double tap, or a retry after a dropped response, is
-        // not an error and does not deserve a write.
-        return {
-          httpStatus: 200,
-          body: { success: true, item: claimStatePayload(found.item), version: row.version }
-        };
-      }
-
-      normalizeClaimFields(found.item);
 
       const updated = await client.query(
         `UPDATE groups
@@ -1545,20 +1731,109 @@ async function runItemAction(req, res, apply) {
       );
 
       return {
-        httpStatus: 200,
-        body: {
-          success: true,
-          item: claimStatePayload(found.item),
-          version: updated.rows[0].version
-        }
+        httpStatus: outcome.httpStatus || 200,
+        member,
+        body: Object.assign({ success: true }, outcome.body, { version: updated.rows[0].version })
       };
     });
 
+    // Freshness bookkeeping, outside the transaction: never a reason to roll a
+    // member's write back.
+    if (payload.member) await touchMember(pool, payload.member);
+
     res.status(payload.httpStatus).json(payload.body);
   } catch (error) {
-    console.error('Error applying item action:', error);
+    console.error('Error applying group write:', error);
     res.status(500).json({ success: false, message: 'Could not apply that change' });
   }
+}
+
+// Resolve :itemId and hand the item to `apply`, which returns one of:
+//   { changed: true }                     -- write it
+//   { unchanged: true }                   -- already in the desired state
+//   { conflict: 'code', message: '...' }  -- somebody got there first (409)
+//
+// `allowOwner` decides whether the item's own owner may use the endpoint. The
+// claim actions say no -- nobody coordinates gifts on their own list, and
+// letting an owner touch them would turn these into a way to ask whether your
+// own gift has been claimed, the question Phase 3 exists to refuse.
+async function runItemAction(req, res, apply, { allowOwner = false } = {}) {
+  const itemId = req.params.itemId;
+
+  if (typeof itemId !== 'string' || !ITEM_ID_PATTERN.test(itemId)) {
+    return res.status(400).json({ success: false, message: 'Invalid item ID format' });
+  }
+
+  return runGroupMutation(req, res, async ({ blob, member, client, groupId }) => {
+    const found = findItemById(blob, itemId);
+
+    if (!found) {
+      // Deleted, or this client is looking at a copy of the group from before
+      // it was. Either way the answer is the same: re-read.
+      return {
+        httpStatus: 404,
+        body: {
+          success: false,
+          code: 'item_not_found',
+          message: 'That item is no longer on the list.'
+        }
+      };
+    }
+
+    const isOwner = found.ownerName === member.member_name;
+
+    if (isOwner && !allowOwner) {
+      return {
+        httpStatus: 403,
+        body: {
+          success: false,
+          code: 'own_item',
+          message: 'You cannot claim gifts on your own wishlist.'
+        }
+      };
+    }
+
+    const outcome = await apply(found.item, member, req.body || {}, {
+      ownerName: found.ownerName,
+      isOwner,
+      blob,
+      client,
+      groupId,
+      index: found.index
+    });
+
+    if (outcome.conflict) {
+      return {
+        httpStatus: 409,
+        body: {
+          success: false,
+          code: outcome.conflict,
+          message: outcome.message,
+          item: claimStatePayload(found.item)
+        }
+      };
+    }
+
+    if (outcome.forbidden) {
+      return {
+        httpStatus: 403,
+        body: { success: false, code: outcome.forbidden, message: outcome.message }
+      };
+    }
+
+    if (outcome.unchanged) {
+      // Idempotent: a double tap, or a retry after a dropped response, is
+      // not an error and does not deserve a write.
+      return { httpStatus: 200, body: { success: true, item: claimStatePayload(found.item) } };
+    }
+
+    normalizeClaimFields(found.item);
+
+    return {
+      changed: true,
+      body: outcome.body || { item: claimStatePayload(found.item) }
+    };
+  });
 }
 
 // Claim an item. This is the check the whole phase is for: if somebody else
@@ -1618,6 +1893,465 @@ app.post('/api/groups/:groupId/items/:itemId/purchase', writeLimiter, async (req
 
     item.purchased = desired;
     return { changed: true };
+  });
+});
+
+// The fingerprint of the fields an owner would change to answer an anonymous
+// "please add more detail". Must produce byte-identical output to
+// itemInfoSignature() in index.html: the client compares the stored signature
+// against its own to decide whether the request has been answered, so the two
+// implementations agreeing is load-bearing.
+function itemInfoSignature(item) {
+  const source = [
+    item.description || '',
+    item.details || '',
+    item.price || '',
+    item.priority || ''
+  ].join('\u0000');
+
+  let hash = 5381;
+  for (let i = 0; i < source.length; i++) {
+    hash = ((hash * 33) ^ source.charCodeAt(i)) >>> 0;
+  }
+  return `${hash.toString(36)}-${source.length.toString(36)}`;
+}
+
+// An item's content, with no claim data in it. Safe to hand to anyone,
+// including the item's owner, which is why the action endpoints answer with
+// this rather than with the raw item.
+function publicItemPayload(item) {
+  return {
+    id: item.id,
+    description: item.description || '',
+    priority: item.priority || 'medium',
+    price: item.price || '',
+    notes: item.notes || '',
+    details: item.details || '',
+    infoRequest: item.infoRequest
+  };
+}
+
+// Split request ids share the item id charset and have to be unique across the
+// group: the respond endpoint addresses them without naming the item.
+function collectSplitRequestIds(blob) {
+  const used = new Set();
+  Object.values((blob && blob.users) || {}).forEach(user => {
+    if (!user || !Array.isArray(user.items)) return;
+    user.items.forEach(item => {
+      splitRequestList(item).forEach(request => {
+        if (request && typeof request.id === 'string') used.add(request.id);
+      });
+    });
+  });
+  return used;
+}
+
+function findSplitRequestById(blob, requestId) {
+  const users = (blob && blob.users) || {};
+
+  for (const [ownerName, user] of Object.entries(users)) {
+    if (!user || !Array.isArray(user.items)) continue;
+
+    for (const item of user.items) {
+      const splitRequest = splitRequestList(item).find(request => request && request.id === requestId);
+      if (splitRequest) return { ownerName, item, splitRequest };
+    }
+  }
+
+  return null;
+}
+
+// A removed member's asks go with them, the same way their claims do.
+function dropSplitRequestsFrom(blob, name) {
+  Object.values((blob && blob.users) || {}).forEach(user => {
+    if (!user || !Array.isArray(user.items)) return;
+    user.items.forEach(item => {
+      const requests = splitRequestList(item);
+      if (requests.length === 0) return;
+      const kept = requests.filter(request => request.from !== name && request.to !== name);
+      if (kept.length > 0) item.splitRequests = kept;
+      else delete item.splitRequests;
+    });
+  });
+}
+
+// ---------------------------------------------------------------
+// Wishlist items: add, edit, delete (brief 7.2)
+//
+// Authorization lives in each handler now, which is the point: Phase 2 could
+// only gate the destructive shapes of a whole-blob write, so until these
+// existed any member could rename the group or rewrite somebody else's item.
+// ---------------------------------------------------------------
+
+// Build a stored item from client input. Mirrors sanitizeGroupData()'s item
+// shape, because these items end up in the same blob.
+function buildItem(input, usedItemIds) {
+  return {
+    id: stableItemId(input && input.id, usedItemIds),
+    description: sanitizeString((input && (input.description || input.item || input.name)) || '', 500),
+    priority: input && ['high', 'medium', 'low'].includes(input.priority) ? input.priority : 'medium',
+    price: input && input.price ? sanitizeString(String(input.price), 20) : '',
+    notes: input && input.notes ? sanitizeString(input.notes, 1000) : '',
+    details: input && input.details ? sanitizeString(input.details, 1000) : '',
+    claimedBy: [],
+    purchased: false,
+    splitWith: []
+  };
+}
+
+function collectItemIds(blob) {
+  const used = new Set();
+  Object.values((blob && blob.users) || {}).forEach(user => {
+    if (!user || !Array.isArray(user.items)) return;
+    user.items.forEach(item => {
+      if (item && typeof item.id === 'string') used.add(item.id);
+    });
+  });
+  return used;
+}
+
+// Add an item to your OWN list. There is deliberately no way to add one to
+// somebody else's.
+app.post('/api/groups/:groupId/items', writeLimiter, async (req, res) => {
+  await runGroupMutation(req, res, async ({ blob, member }) => {
+    const name = member.member_name;
+
+    if (!blob.users || typeof blob.users !== 'object' || Array.isArray(blob.users)) blob.users = {};
+    if (!blob.users[name] || !Array.isArray(blob.users[name].items)) blob.users[name] = { items: [] };
+
+    const items = blob.users[name].items;
+    if (items.length >= 100) {
+      return {
+        httpStatus: 409,
+        body: { success: false, code: 'list_full', message: 'Your wishlist is full (100 items).' }
+      };
+    }
+
+    const item = buildItem(req.body, collectItemIds(blob));
+    if (!item.description) {
+      return {
+        httpStatus: 400,
+        body: { success: false, code: 'description_required', message: 'Please enter an item description.' }
+      };
+    }
+
+    items.push(item);
+    return { changed: true, body: { item } };
+  });
+});
+
+// Edit an item. Your own, or anyone's if you are the creator.
+app.patch('/api/groups/:groupId/items/:itemId', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, async (item, member, body, ctx) => {
+    if (!ctx.isOwner) {
+      const allowed = await hasCreatorAuthority(
+        ctx.client, ctx.groupId, ctx.blob, member, readActingName(req)
+      );
+      if (!allowed) {
+        return {
+          forbidden: 'creator_only',
+          message: 'Only the group creator can edit someone else\'s item.'
+        };
+      }
+    }
+
+    const description = sanitizeString(body.description || '', 500);
+    if (!description) {
+      return { conflict: 'description_required', message: 'Please enter an item description.' };
+    }
+
+    item.description = description;
+    if (body.priority !== undefined) {
+      item.priority = ['high', 'medium', 'low'].includes(body.priority) ? body.priority : 'medium';
+    }
+    if (body.price !== undefined) item.price = body.price ? sanitizeString(String(body.price), 20) : '';
+    if (body.details !== undefined) item.details = body.details ? sanitizeString(body.details, 1000) : '';
+    if (body.notes !== undefined) item.notes = body.notes ? sanitizeString(body.notes, 1000) : '';
+
+    // Editing is how an owner answers an anonymous "please add more detail",
+    // so a real change clears the marker (same rule the client used to apply).
+    if (item.infoRequest && itemInfoSignature(item) !== item.infoRequest.signature) {
+      delete item.infoRequest;
+    }
+
+    return { changed: true, body: { item: publicItemPayload(item) } };
+  }, { allowOwner: true });
+});
+
+// Delete an item. Your own, or anyone's if you are the creator.
+app.delete('/api/groups/:groupId/items/:itemId', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, async (item, member, body, ctx) => {
+    if (!ctx.isOwner) {
+      const allowed = await hasCreatorAuthority(
+        ctx.client, ctx.groupId, ctx.blob, member, readActingName(req)
+      );
+      if (!allowed) {
+        return {
+          forbidden: 'creator_only',
+          message: 'Only the group creator can delete someone else\'s item.'
+        };
+      }
+    }
+
+    ctx.blob.users[ctx.ownerName].items.splice(ctx.index, 1);
+    return { changed: true, body: { deletedId: item.id } };
+  }, { allowOwner: true });
+});
+
+// Anonymously ask an owner for more detail (existing behaviour, brief 7.2).
+//
+// Nothing identifying the asker is stored -- the whole blob is served to every
+// member, so a name here would give them away. The client remembers locally
+// that it already asked.
+app.post('/api/groups/:groupId/items/:itemId/info-request', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, (item) => {
+    const signature = itemInfoSignature(item);
+    const existing = item.infoRequest && item.infoRequest.signature === signature
+      ? item.infoRequest
+      : null;
+
+    item.infoRequest = sanitizeInfoRequest({
+      count: existing ? (Number(existing.count) || 0) + 1 : 1,
+      signature,
+      lastRequestedAt: new Date().toISOString()
+    });
+
+    return { changed: true, body: { item: publicItemPayload(item) } };
+  });
+});
+
+// ---------------------------------------------------------------
+// Split requests (brief 7.4): ask, then be answered.
+// ---------------------------------------------------------------
+
+// Bob asks to join Mary's claim.
+app.post('/api/groups/:groupId/items/:itemId/split-request', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, (item, member, body, ctx) => {
+    pruneSplitRequests(item);
+
+    const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+    const asker = member.member_name;
+
+    if (claimedBy.length === 0) {
+      return { conflict: 'not_claimed', message: 'Nobody has claimed this yet — you can just claim it.' };
+    }
+    if (claimedBy.includes(asker)) {
+      return { conflict: 'already_sharing', message: "You're already in on this gift." };
+    }
+    if (item.purchased) {
+      return { conflict: 'already_purchased', message: 'This gift has already been bought.' };
+    }
+
+    const mine = splitRequestList(item).filter(request => request.from === asker);
+    if (mine.some(request => request.status === 'pending')) {
+      return { conflict: 'already_pending', message: 'You have already asked — waiting for an answer.' };
+    }
+    // One ask, and one more after a decline. Then that is the end of it.
+    if (mine.length >= MAX_SPLIT_ATTEMPTS_PER_ITEM) {
+      return { conflict: 'split_attempts_exhausted', message: 'You have already asked about this gift twice.' };
+    }
+
+    const request = {
+      id: stableItemId(null, collectSplitRequestIds(ctx.blob)),
+      from: asker,
+      to: claimedBy[0],
+      status: 'pending',
+      requestedAt: new Date().toISOString()
+    };
+
+    item.splitRequests = splitRequestList(item).concat([request]);
+    return { changed: true, body: { request } };
+  });
+});
+
+// Mary answers. Any current claimer may answer -- on an already-split gift
+// there is more than one person who could.
+app.post('/api/groups/:groupId/split-requests/:requestId/respond', writeLimiter, async (req, res) => {
+  const requestId = req.params.requestId;
+
+  if (typeof requestId !== 'string' || !ITEM_ID_PATTERN.test(requestId)) {
+    return res.status(400).json({ success: false, message: 'Invalid request ID format' });
+  }
+
+  await runGroupMutation(req, res, async ({ blob, member }) => {
+    const found = findSplitRequestById(blob, requestId);
+    if (!found) {
+      return {
+        httpStatus: 404,
+        body: { success: false, code: 'request_not_found', message: 'That request is no longer open.' }
+      };
+    }
+
+    const { item, splitRequest, ownerName } = found;
+    pruneSplitRequests(item);
+
+    const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+
+    // The gift's owner must never see, let alone answer, a split request on
+    // their own item -- that would tell them it had been claimed.
+    if (ownerName === member.member_name || !claimedBy.includes(member.member_name)) {
+      return {
+        httpStatus: 403,
+        body: {
+          success: false,
+          code: 'not_the_claimer',
+          message: 'Only whoever claimed this gift can answer that.'
+        }
+      };
+    }
+
+    if (splitRequest.status !== 'pending') {
+      return {
+        httpStatus: 409,
+        body: {
+          success: false,
+          code: 'already_answered',
+          message: 'That request has already been answered.',
+          request: splitRequest
+        }
+      };
+    }
+
+    const accept = Boolean((req.body || {}).accept);
+    splitRequest.status = accept ? 'accepted' : 'declined';
+    splitRequest.respondedAt = new Date().toISOString();
+
+    if (accept && !claimedBy.includes(splitRequest.from)) {
+      item.claimedBy = claimedBy.concat(splitRequest.from);
+      item.splitWith = (Array.isArray(item.splitWith) ? item.splitWith : []).concat(splitRequest.from);
+    }
+
+    normalizeClaimFields(item);
+    return { changed: true, body: { request: splitRequest, item: claimStatePayload(item) } };
+  });
+});
+
+// Bob dismisses a decline he has been shown. Only his own, and only one that
+// has actually been answered.
+app.post('/api/groups/:groupId/split-requests/:requestId/dismiss', writeLimiter, async (req, res) => {
+  const requestId = req.params.requestId;
+
+  if (typeof requestId !== 'string' || !ITEM_ID_PATTERN.test(requestId)) {
+    return res.status(400).json({ success: false, message: 'Invalid request ID format' });
+  }
+
+  await runGroupMutation(req, res, async ({ blob, member }) => {
+    const found = findSplitRequestById(blob, requestId);
+    if (!found) {
+      return { httpStatus: 200, body: { success: true, message: 'Already gone' } };
+    }
+
+    if (found.splitRequest.from !== member.member_name) {
+      return {
+        httpStatus: 403,
+        body: { success: false, code: 'not_yours', message: 'That is not your request.' }
+      };
+    }
+
+    found.splitRequest.dismissed = true;
+    return { changed: true, body: { requestId } };
+  });
+});
+
+// ---------------------------------------------------------------
+// Group settings and membership -- creator only (brief 7.2)
+// ---------------------------------------------------------------
+app.patch('/api/groups/:groupId/settings', writeLimiter, async (req, res) => {
+  await runGroupMutation(req, res, async ({ blob, member, client, groupId }) => {
+    const allowed = await hasCreatorAuthority(client, groupId, blob, member, readActingName(req));
+    if (!allowed) {
+      return {
+        httpStatus: 403,
+        body: {
+          success: false,
+          code: 'creator_only',
+          message: 'Only the group creator can change the group settings.'
+        }
+      };
+    }
+
+    const body = req.body || {};
+
+    if (body.groupName !== undefined) {
+      const groupName = sanitizeString(body.groupName, 100);
+      if (!groupName) {
+        return {
+          httpStatus: 400,
+          body: { success: false, code: 'name_required', message: 'The group needs a name.' }
+        };
+      }
+      blob.groupName = groupName;
+    }
+
+    if (body.holiday !== undefined) {
+      if (!['Christmas', 'Birthday', 'Hanukkah', 'Anniversary', 'Other'].includes(body.holiday)) {
+        return {
+          httpStatus: 400,
+          body: { success: false, code: 'invalid_holiday', message: 'That is not an event type we know.' }
+        };
+      }
+      blob.holiday = body.holiday;
+    }
+
+    if (body.eventDate !== undefined) {
+      if (body.eventDate && !validator.isISO8601(String(body.eventDate))) {
+        return {
+          httpStatus: 400,
+          body: { success: false, code: 'invalid_date', message: 'That date is not valid.' }
+        };
+      }
+      blob.eventDate = body.eventDate || '';
+    }
+
+    return {
+      changed: true,
+      body: { settings: { groupName: blob.groupName, holiday: blob.holiday, eventDate: blob.eventDate } }
+    };
+  });
+});
+
+app.delete('/api/groups/:groupId/members/:name', writeLimiter, async (req, res) => {
+  await runGroupMutation(req, res, async ({ blob, member, client, groupId }) => {
+    const target = sanitizeString(decodeURIComponent(req.params.name || ''), 100);
+
+    const allowed = await hasCreatorAuthority(client, groupId, blob, member, readActingName(req));
+    if (!allowed) {
+      return {
+        httpStatus: 403,
+        body: {
+          success: false,
+          code: 'creator_only',
+          message: 'Only the group creator can remove someone from the group.'
+        }
+      };
+    }
+
+    if (!target || !blob.users || !blob.users[target]) {
+      return {
+        httpStatus: 404,
+        body: { success: false, code: 'member_not_found', message: 'That person is not in this group.' }
+      };
+    }
+
+    if (target === member.member_name) {
+      return {
+        httpStatus: 409,
+        body: { success: false, code: 'cannot_remove_self', message: 'You cannot remove yourself from the group.' }
+      };
+    }
+
+    delete blob.users[target];
+    scrubNamesFromClaims(blob, [target]);
+    dropSplitRequestsFrom(blob, target);
+
+    // Their devices go with them, so the name is free again and no rows are
+    // left pointing at a member who is not in the group.
+    await client.query(
+      'DELETE FROM group_members WHERE group_id = $1 AND member_name = $2',
+      [groupId, target]
+    );
+
+    return { changed: true, body: { removed: target } };
   });
 });
 
@@ -1789,8 +2523,16 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
           // were restored from storage just above, so the client's own pass
           // over them could not have caught these.
           scrubNamesFromClaims(sanitizedData, removedUsers);
+          removedUsers.forEach(name => dropSplitRequestsFrom(sanitizedData, name));
         }
       }
+
+      // Gap 1: settings and other people's item content are not this writer's
+      // to change unless they are the creator.
+      const writerIsCreator = await hasCreatorAuthority(
+        client, groupId, storedBlob, member, readActingName(req)
+      );
+      enforceWriteAuthority(sanitizedData, storedBlob, member.member_name, writerIsCreator);
 
       const updated = await client.query(
         `UPDATE groups
@@ -1943,7 +2685,22 @@ app.post('/api/groups/:groupId/undo-reset', writeLimiter, async (req, res) => {
       }
 
       // Never resurrect something the retention rules have already condemned.
-      if (row.undo_expired || row.retention_expired) {
+      // These are two different reasons and deserve two different answers: a
+      // group reset yesterday but untouched for two years is refused by
+      // retention, and telling its owner the 30-day window has passed would be
+      // a plain lie.
+      if (row.retention_expired) {
+        return {
+          httpStatus: 410,
+          body: {
+            success: false,
+            code: 'retention_expired',
+            message: 'This group has not been used for over two years, so it is being deleted and cannot be restored.'
+          }
+        };
+      }
+
+      if (row.undo_expired) {
         return {
           httpStatus: 410,
           body: {

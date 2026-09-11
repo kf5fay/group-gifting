@@ -190,13 +190,15 @@ npm start
 
 ### Splitting a Gift
 1. See a gift that's already claimed by someone else?
-2. Click "Split Gift" to go in together
-3. Both of you will be listed as claimers
-4. Perfect for expensive items!
+2. Click "🤝 Ask to Split"
+3. Whoever claimed it sees your request on their next poll and answers yes or no
+4. If they say yes, you're both listed as claimers
 
-Splitting is currently unilateral — you join someone else's claim without asking.
-Changing this to a request the current claimer accepts or declines is planned
-(remediation brief 7.4) and not yet built.
+You can't simply join someone else's claim any more — they have to agree. A decline
+is shown to you once and then dismissed, so you are never left waiting on an answer
+that already came. You may ask twice about the same gift; after a second decline that
+is the end of it. Pending requests lapse after 30 days, or as soon as the gift is
+unclaimed or marked bought. The gift's own recipient sees none of it.
 
 ### Group Creator Powers
 As the group creator, you have special abilities:
@@ -301,16 +303,20 @@ writes the group inside a single transaction with the row locked. If two people 
 same gift at the same moment, one succeeds and the other gets a `409` with the current
 state and a message saying so — the server decides, not whichever browser saves last.
 
-Everything else — adding, editing and deleting items, settings, and removing a member —
-still sends the whole group object and is last-writer-wins. Two people adding items to
-different lists at the same moment can still lose one. Converting those to granular
-endpoints is the remaining Phase 4 work (remediation brief 7.2 and 7.4).
+Adding, editing and deleting items, asking for more detail, splitting, changing settings
+and removing a member each work the same way, through their own endpoint. Two people
+adding items to different lists at the same moment both land.
 
-Because clients only ever hold a *filtered* copy of the group, the whole-blob write is not
-trusted with claim state: claim data is authoritative in the database, and such a write may
-only add or remove **the writer's own** participation in a claim. It can never alter anyone
-else's. Without that, a tab that last polled before a claim was made would undo it on its
-next save.
+Authorization lives in those handlers, which is the point of having them: the whole-blob
+write could only ever gate its most destructive shapes, so until they existed any member
+could rename the group or rewrite somebody else's item.
+
+Creating a group is the only thing the client still sends a whole blob for. The server
+keeps accepting one for an existing group, so a tab left open from an older version does
+not simply fail — but it is not trusted with anything: claim state, split requests, group
+settings and other people's items are all taken from storage, and such a write may only
+change what its author is allowed to change. A stale snapshot can no longer undo a claim
+made since that tab last polled.
 
 `groups.version` increments on every write and is returned by `GET /api/groups/:groupId`.
 
@@ -378,9 +384,20 @@ Reads and writes:
   caller's own list, and only once the event date has passed.
 
 Item actions — transactional, addressed by stable item id:
+- `POST /api/groups/:groupId/items` — add an item to your own list
+- `PATCH /api/groups/:groupId/items/:itemId` — edit (your own item, or any if you are the creator)
+- `DELETE /api/groups/:groupId/items/:itemId` — delete (same rule)
 - `POST /api/groups/:groupId/items/:itemId/claim` — `409` if someone else holds it
 - `POST /api/groups/:groupId/items/:itemId/unclaim`
 - `POST /api/groups/:groupId/items/:itemId/purchase` — body `{ purchased }`, or toggles
+- `POST /api/groups/:groupId/items/:itemId/info-request` — anonymous; stores no asker
+- `POST /api/groups/:groupId/items/:itemId/split-request` — ask to go in on a claim
+- `POST /api/groups/:groupId/split-requests/:requestId/respond` — body `{ accept }`, claimer only
+- `POST /api/groups/:groupId/split-requests/:requestId/dismiss` — asker acknowledges a decline
+
+Creator only:
+- `PATCH /api/groups/:groupId/settings` — group name, event type, event date
+- `DELETE /api/groups/:groupId/members/:name` — remove a member, their list and their claims
 
 Group lifecycle:
 - `POST /api/groups/:groupId/reset` — creator only; soft delete
@@ -391,11 +408,13 @@ Other:
 - `POST /api/contact` — submit contact form
 - `GET /api/health` — health check endpoint
 
-Member tokens travel in an `X-Member-Token` header, never in a query string.
+Member tokens travel in an `X-Member-Token` header, never in a query string. Group
+responses are sent `Cache-Control: private, no-store` and `Vary: X-Member-Token`, because
+the same URL returns a different body to each viewer and a shared cache must never reuse
+one member's for another.
 
-Not yet built (remediation brief 7.2/7.4): granular endpoints for adding, editing and
-deleting items, settings, removing a member, and split request/accept. Those paths still
-go through `POST /api/groups/:groupId`.
+Not built, deliberately: optimistic locking on the whole-blob write (remediation brief
+7.3). Every path the client uses is granular now, so there is no blob write left to lock.
 
 **Admin Endpoints (require authentication):**
 - `POST /admin/api/login` - Admin login
