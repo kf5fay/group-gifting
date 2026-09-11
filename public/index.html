@@ -2499,10 +2499,14 @@
 
                                 if (!isPurchased) {
                                     if (claimedByMe) {
-                                        html += `<button onclick="unclaimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
-                                        html += `<button onclick="markPurchased('${escapeJsAttr(username)}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
+                                        // Addressed by item id, not index: these three
+                                        // go to the action endpoints, where the item has
+                                        // to be identifiable after somebody else has
+                                        // added or removed one (brief 7.2).
+                                        html += `<button onclick="unclaimItem('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
+                                        html += `<button onclick="markPurchased('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
                                     } else if (!isClaimed) {
-                                        html += `<button onclick="claimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
+                                        html += `<button onclick="claimItem('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
                                     } else {
                                         html += `<button onclick="splitGift('${escapeJsAttr(username)}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
                                     }
@@ -2909,35 +2913,105 @@
             editingIndex = null;
         }
 
-        // Claim Item
-        async function claimItem(username, itemIndex) {
-            const item = groupData.users[username].items[itemIndex];
-            
-            if (!item.claimedBy) {
-                item.claimedBy = [];
+        // ============================================================
+        // Claim / unclaim / purchase (brief 7.2)
+        // ------------------------------------------------------------
+        // These three no longer post the whole group. Each is a single call
+        // naming the item by its stable id, applied by the server inside a
+        // transaction -- so when two people claim the same gift at the same
+        // moment, one of them is told, instead of one change quietly vanishing.
+        //
+        // Items are addressed by id, never by array index: an index means a
+        // different item the moment anyone adds or deletes one.
+        // ============================================================
+
+        // Ask the server to apply one action to one item.
+        //
+        // Returns the updated claim state on success, or null once the failure
+        // has been shown to the user. Every failure path ends with the group
+        // re-read, because every one of them means this tab's copy is stale.
+        async function applyItemAction(username, item, action, body) {
+            if (!item || !item.id) {
+                // An item this browser is holding from before the server gave
+                // it an id. Nothing to address it by; a re-read fixes it.
+                await loadGroup(true);
+                renderWishlists();
+                showActionNotice('That list was out of date — it has been refreshed, please try again.');
+                return null;
             }
 
-            if (!item.claimedBy.includes(currentUser)) {
-                item.claimedBy.push(currentUser);
-                await saveData();
-                renderWishlists();
+            let response;
+            try {
+                response = await apiFetch(
+                    `/api/groups/${groupId}/items/${encodeURIComponent(item.id)}/${action}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body || {})
+                    }
+                );
+            } catch (error) {
+                console.error(`Error applying ${action}:`, error);
+                showSaveError('We could not reach the server.');
+                return null;
             }
+
+            const result = await response.json().catch(() => null);
+
+            if (result && result.reset) {
+                resetState = result.reset;
+                showResetScreen();
+                return null;
+            }
+
+            if (response.status === 409 || response.status === 404) {
+                // Somebody got there first, or the item is gone. Show what
+                // actually happened, then put the truth on screen.
+                showActionNotice(result && result.message
+                    ? `${result.message} Refreshing to show what changed.`
+                    : 'That gift just changed — refreshing to show the latest.');
+                await loadGroup(true);
+                renderWishlists();
+                return null;
+            }
+
+            if (!response.ok || !result || !result.success) {
+                showSaveError(result && result.message ? result.message : null);
+                return null;
+            }
+
+            // Patch the local copy from the server's answer rather than
+            // guessing; the next poll reconciles everything else.
+            const local = groupData.users[username]
+                && groupData.users[username].items.find(entry => entry.id === item.id);
+            if (local) {
+                local.claimedBy = result.item.claimedBy;
+                local.purchased = result.item.purchased;
+                local.splitWith = result.item.splitWith;
+            }
+
+            hideSaveError();
+            return result.item;
         }
 
-        // Unclaim Item
-        async function unclaimItem(username, itemIndex) {
-            const item = groupData.users[username].items[itemIndex];
-            
-            if (item.claimedBy) {
-                item.claimedBy = item.claimedBy.filter(name => name !== currentUser);
-            }
-
-            if (item.splitWith) {
-                item.splitWith = item.splitWith.filter(name => name !== currentUser);
-            }
-
-            await saveData();
+        async function claimItem(username, itemId) {
+            const item = findRenderedItem(username, itemId);
+            if (!await applyItemAction(username, item, 'claim')) return;
             renderWishlists();
+        }
+
+        async function unclaimItem(username, itemId) {
+            const item = findRenderedItem(username, itemId);
+            if (!await applyItemAction(username, item, 'unclaim')) return;
+            renderWishlists();
+        }
+
+        // Look an item up by the id the button was rendered with. Returns
+        // undefined if the list has moved on, which applyItemAction handles.
+        function findRenderedItem(username, itemId) {
+            const user = groupData.users && groupData.users[username];
+            if (!user || !Array.isArray(user.items)) return undefined;
+            return user.items.find(item => item && item.id === itemId);
         }
 
         // Split Gift
@@ -2959,13 +3033,15 @@
         }
 
         // Mark as Purchased
-        async function markPurchased(username, itemIndex) {
+        async function markPurchased(username, itemId) {
             if (confirm('Mark this gift as purchased?')) {
-                groupData.users[username].items[itemIndex].purchased = true;
-                
-                await saveData();
+                const item = findRenderedItem(username, itemId);
+                // Send the state we want rather than asking for a toggle, so a
+                // double tap cannot undo itself.
+                if (!await applyItemAction(username, item, 'purchase', { purchased: true })) return;
+
                 renderWishlists(); // Show the purchased state first
-                
+
                 // Wait 1.5 seconds so user can see the item marked as purchased,
                 // then collapse the wishlist
                 setTimeout(() => {
@@ -3122,6 +3198,21 @@
 
             // Auto-hide after a while so it does not sit there forever, but
             // long enough to actually be read.
+            if (saveErrorTimer) clearTimeout(saveErrorTimer);
+            saveErrorTimer = setTimeout(hideSaveError, 12000);
+        }
+
+        // A conflict is not a failure to save -- somebody else simply got there
+        // first, and the honest thing to say is what changed. Same toast, own
+        // wording, so it does not read like an error the user caused.
+        function showActionNotice(message) {
+            const toast = document.getElementById('saveErrorToast');
+            const text = document.getElementById('saveErrorToastText');
+            if (!toast || !text) return;
+
+            text.textContent = message;
+            toast.classList.add('show');
+
             if (saveErrorTimer) clearTimeout(saveErrorTimer);
             saveErrorTimer = setTimeout(hideSaveError, 12000);
         }

@@ -229,9 +229,97 @@ const databaseReady = pool.query(`
   `);
 }).then(() => {
   console.log('✅ Database migration completed (version + deleted_at columns)');
+
+  return backfillItemIds();
 }).catch(err => {
   console.error('❌ Database initialization error:', err);
 });
+
+// ---------------------------------------------------------------
+// Phase 4 migration: give every stored item a stable, unique id.
+//
+// Item ids arrived in August 2026. The app has been live since November 2025,
+// and groups are kept for two years -- so every group written before then is
+// still in this table, holding items with no `id` field at all. The action
+// endpoints below address items by id, so on those groups the browser would
+// have nothing to put in the URL and Claim would simply be dead.
+//
+// Relying on the next whole-blob write to mint the ids is not good enough:
+// two tabs each holding a pre-id copy mint DIFFERENT ids for the same item, so
+// an id handed to one client can be invalidated by another client's save. The
+// backfill therefore happens once, here, before anything starts addressing
+// items by id.
+//
+// Idempotent. A group whose items already carry unique, well-formed ids is left
+// byte-for-byte alone, so a restart costs one read per group and no writes.
+// Soft-deleted groups are included -- they can still be undone (brief 5.7).
+//
+// NOTE: this deliberately does not touch updated_at. That column drives the
+// two-year retention sweep, and a migration must not make every group in the
+// table look freshly active.
+// ---------------------------------------------------------------
+async function backfillItemIds() {
+  const BATCH_SIZE = 100;
+  let cursor = '';
+  let scanned = 0;
+  let groupsChanged = 0;
+  let idsAssigned = 0;
+
+  try {
+    for (;;) {
+      const page = await pool.query(
+        'SELECT group_id FROM groups WHERE group_id > $1 ORDER BY group_id ASC LIMIT $2',
+        [cursor, BATCH_SIZE]
+      );
+
+      if (page.rows.length === 0) break;
+
+      for (const row of page.rows) {
+        const groupId = row.group_id;
+        scanned++;
+
+        try {
+          const assigned = await withTransaction(async (client) => {
+            const current = await client.query(
+              'SELECT data FROM groups WHERE group_id = $1 FOR UPDATE',
+              [groupId]
+            );
+            if (current.rows.length === 0) return 0;
+
+            const blob = current.rows[0].data || {};
+            const changed = assignMissingItemIds(blob);
+            if (changed === 0) return 0;
+
+            await client.query(
+              'UPDATE groups SET data = $1 WHERE group_id = $2',
+              [JSON.stringify(blob), groupId]
+            );
+            return changed;
+          });
+
+          if (assigned > 0) {
+            groupsChanged++;
+            idsAssigned += assigned;
+          }
+        } catch (error) {
+          // One unreadable row must not stop the migration for every other
+          // group. It will be retried on the next restart.
+          console.error(`Error backfilling item ids for group ${groupId}:`, error);
+        }
+      }
+
+      cursor = page.rows[page.rows.length - 1].group_id;
+    }
+
+    if (groupsChanged > 0) {
+      console.log(`✅ Item id backfill: ${idsAssigned} ids assigned across ${groupsChanged} of ${scanned} groups`);
+    } else {
+      console.log(`✅ Item id backfill: nothing to do (${scanned} groups checked)`);
+    }
+  } catch (error) {
+    console.error('Error running item id backfill:', error);
+  }
+}
 
 // Admin session storage (in-memory for simplicity)
 const adminSessions = new Map(); // sessionToken -> { createdAt, expiresAt }
@@ -273,6 +361,74 @@ function sanitizeString(str, maxLength = 500) {
 // Generate a stable id for a wishlist item (used to track anonymous info requests)
 function generateItemId() {
   return require('crypto').randomBytes(9).toString('hex');
+}
+
+// What a well-formed item id looks like. Accepts both the 18-char hex ids the
+// server mints and the UUIDs the client generates. Used in three places that
+// must agree: sanitizeGroupData(), the backfill migration, and the :itemId
+// route parameter on the action endpoints.
+const ITEM_ID_PATTERN = /^[a-zA-Z0-9-]{1,40}$/;
+
+// Item ids address items in the action endpoints (brief 7.2), whose paths carry
+// no username -- so an id has to identify ONE item across the whole group, not
+// merely within one list. Nothing used to enforce that: the server would
+// happily store two items sharing an id, in the same list or in different ones.
+// The first item to hold a well-formed id keeps it; anything missing,
+// malformed, or colliding gets a fresh one.
+function stableItemId(rawId, used) {
+  const candidate = typeof rawId === 'string' && ITEM_ID_PATTERN.test(rawId.trim())
+    ? rawId.trim()
+    : generateItemId();
+
+  if (!used.has(candidate)) {
+    used.add(candidate);
+    return candidate;
+  }
+
+  let replacement = generateItemId();
+  while (used.has(replacement)) replacement = generateItemId();
+  used.add(replacement);
+  return replacement;
+}
+
+// Give every item in a stored blob a unique id, in place. Returns how many it
+// had to change, so a caller can skip the write when there is nothing to do.
+//
+// Deliberately does NOT run the blob through sanitizeGroupData(): this touches
+// live rows written by older versions of the app, and re-normalising them would
+// quietly drop or reshape fields that have nothing to do with ids.
+function assignMissingItemIds(blob) {
+  const users = blob && blob.users;
+  if (!users || typeof users !== 'object' || Array.isArray(users)) return 0;
+
+  const used = new Set();
+  let changed = 0;
+
+  for (const user of Object.values(users)) {
+    if (!user || !Array.isArray(user.items)) continue;
+
+    for (const item of user.items) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+
+      const current = typeof item.id === 'string' ? item.id.trim() : '';
+      if (current && ITEM_ID_PATTERN.test(current) && !used.has(current)) {
+        used.add(current);
+        if (item.id !== current) {
+          item.id = current;
+          changed++;
+        }
+        continue;
+      }
+
+      let fresh = generateItemId();
+      while (used.has(fresh)) fresh = generateItemId();
+      used.add(fresh);
+      item.id = fresh;
+      changed++;
+    }
+  }
+
+  return changed;
 }
 
 // Sanitize an anonymous "more info requested" marker on an item.
@@ -515,71 +671,127 @@ function groupMetadataPayload(blob) {
   };
 }
 
-// The other half of filtering.
+// The other half of filtering, and the other half of the concurrency fix.
 //
-// Writes are still whole-blob until Phase 4, and a client now only ever holds a
-// FILTERED copy of the group. So the fields we stripped on the way out would
-// come back missing on the way in and erase themselves -- every member would
-// silently wipe the claims on their own list every time they added an item.
-// Restore them here, by item id, from what is actually stored.
+// Writes are still whole-blob outside the action endpoints above, and a client
+// only ever holds a FILTERED copy of the group. Two things follow, and this
+// function handles both:
 //
-// This runs for the writer's OWN items only. Everybody else's items arrive
-// intact, because they were never filtered on the way out.
-function restoreOwnItemPrivateFields(incoming, stored, viewerName) {
-  if (!viewerName) return;
-
-  const incomingUser = incoming && incoming.users && incoming.users[viewerName];
-  if (!incomingUser || !Array.isArray(incomingUser.items)) return;
-
-  const storedUser = stored && stored.users && stored.users[viewerName];
-  const storedItems = storedUser && Array.isArray(storedUser.items) ? storedUser.items : [];
-
-  const storedById = new Map();
+//  1. The claim fields stripped on the way out would come back missing on the
+//     way in and erase themselves -- every member silently wiping the claims on
+//     their own list every time they added an item.
+//
+//  2. A whole-blob write carries a snapshot of EVERYONE's claim state, taken
+//     whenever that tab last polled. Writing it back verbatim would undo any
+//     claim made in between -- the exact lost update the action endpoints
+//     exist to prevent, arriving by a different road.
+//
+// So claim state is authoritative in storage, and a whole-blob write may change
+// it in exactly one way: by adding or removing the WRITER's own participation.
+// It can never alter anyone else's claim. That keeps the legacy unilateral
+// Split Gift button and any still-cached older client working, while making a
+// stale snapshot harmless.
+function createItemMatcher(storedItems) {
+  const byId = new Map();
   storedItems.forEach(item => {
-    if (item && typeof item.id === 'string') storedById.set(item.id, item);
+    if (item && typeof item.id === 'string') byId.set(item.id, item);
   });
 
-  // Items stored before this app had item ids at all. sanitizeGroupData() mints
-  // one for such an item on its way in, so by the time we get here there is no
-  // id to match on, and the claims sitting on it would be lost on this member's
-  // very first save. Fall back to the description -- stable, and consumed in
-  // order so that duplicate descriptions pair up the way they are listed.
-  // Position would be the obvious alternative and is wrong: adding or deleting
-  // an item shifts every index after it.
-  const storedByDescription = new Map();
+  // Items stored before this app had item ids. The startup backfill gives every
+  // stored item an id, so this is now only reachable for a row written between
+  // that migration and this request -- but it costs little and losing claim
+  // data is not a nice way to find out the migration missed something.
+  // Description rather than position: adding or deleting an item shifts every
+  // index after it.
+  const byDescription = new Map();
   storedItems.forEach(item => {
     if (!item || typeof item.id === 'string') return;
     const key = item.description || '';
-    if (!storedByDescription.has(key)) storedByDescription.set(key, []);
-    storedByDescription.get(key).push(item);
+    if (!byDescription.has(key)) byDescription.set(key, []);
+    byDescription.get(key).push(item);
   });
 
-  incomingUser.items.forEach(item => {
-    let previous = storedById.get(item.id);
+  return function matchStoredItem(item) {
+    const byIdMatch = byId.get(item.id);
+    if (byIdMatch) return byIdMatch;
 
-    if (!previous) {
-      const sameDescription = storedByDescription.get(item.description || '');
-      if (sameDescription && sameDescription.length > 0) previous = sameDescription.shift();
-    }
-    // No stored counterpart means the member has just added this item, and an
-    // item nobody else has seen yet cannot have been claimed. Whatever the
-    // client sent for these fields is ignored either way: an owner has no
-    // business setting claim state on their own list.
-    if (!previous) {
-      item.claimedBy = [];
-      item.purchased = false;
-      item.splitWith = [];
-      return;
-    }
+    const queue = byDescription.get(item.description || '');
+    return queue && queue.length > 0 ? queue.shift() : null;
+  };
+}
 
-    item.claimedBy = Array.isArray(previous.claimedBy)
-      ? previous.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100))
-      : [];
-    item.purchased = Boolean(previous.purchased);
-    item.splitWith = Array.isArray(previous.splitWith)
-      ? previous.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
-      : [];
-  });
+function claimNames(value) {
+  return Array.isArray(value)
+    ? value.slice(0, 10).map(name => sanitizeString(name, 100)).filter(Boolean)
+    : [];
+}
+
+function reconcileClaimState(incoming, stored, writerName) {
+  if (!writerName) return;
+
+  const incomingUsers = (incoming && incoming.users) || {};
+  const storedUsers = (stored && stored.users) || {};
+
+  for (const [ownerName, user] of Object.entries(incomingUsers)) {
+    if (!user || !Array.isArray(user.items)) continue;
+
+    const storedOwner = storedUsers[ownerName];
+    const matchStoredItem = createItemMatcher(
+      storedOwner && Array.isArray(storedOwner.items) ? storedOwner.items : []
+    );
+    const isOwnList = ownerName === writerName;
+
+    user.items.forEach(item => {
+      const previous = matchStoredItem(item);
+
+      if (!previous) {
+        // Newly added. Nobody can have claimed an item no one else has seen,
+        // and an owner has no business setting claim state on their own list.
+        item.claimedBy = [];
+        item.purchased = false;
+        item.splitWith = [];
+        return;
+      }
+
+      const storedClaimedBy = claimNames(previous.claimedBy);
+      const storedSplitWith = claimNames(previous.splitWith);
+      const storedPurchased = Boolean(previous.purchased);
+
+      if (isOwnList) {
+        // The writer was never shown any of this, so whatever arrived is an
+        // artefact of the filtering, not an intention.
+        item.claimedBy = storedClaimedBy;
+        item.splitWith = storedSplitWith;
+        item.purchased = storedPurchased;
+        return;
+      }
+
+      // Somebody else's item: start from storage, then allow only the writer's
+      // own participation to move.
+      const wantsIn = claimNames(item.claimedBy).includes(writerName);
+      const wasIn = storedClaimedBy.includes(writerName);
+
+      if (wantsIn && !wasIn) {
+        item.claimedBy = storedClaimedBy.concat(writerName);
+        item.splitWith = claimNames(item.splitWith).includes(writerName)
+          ? storedSplitWith.concat(writerName)
+          : storedSplitWith;
+      } else if (!wantsIn && wasIn) {
+        item.claimedBy = storedClaimedBy.filter(name => name !== writerName);
+        item.splitWith = storedSplitWith.filter(name => name !== writerName);
+      } else {
+        item.claimedBy = storedClaimedBy;
+        item.splitWith = storedSplitWith;
+      }
+
+      // `purchased` is shared state -- only someone actually buying the gift
+      // may move it.
+      item.purchased = item.claimedBy.includes(writerName)
+        ? Boolean(item.purchased)
+        : storedPurchased;
+      if (item.claimedBy.length === 0) item.purchased = false;
+    });
+  }
 }
 
 // Removing a member has to take their claims with them. The frontend does this
@@ -711,6 +923,10 @@ function sanitizeGroupData(data) {
   // Sanitize users
   if (data.users && typeof data.users === 'object') {
     const usernames = Object.keys(data.users).slice(0, 50);
+
+    // Shared across every list in the group, not per user: the action endpoints
+    // look an item up by id alone.
+    const usedItemIds = new Set();
     
     for (const username of usernames) {
       const cleanUsername = sanitizeString(username, 100);
@@ -719,13 +935,11 @@ function sanitizeGroupData(data) {
       sanitized.users[cleanUsername] = {
         items: Array.isArray(user.items) 
           ? user.items.slice(0, 100).map(item => ({
-              // Item ids are machine-generated identifiers, not user prose.
-              // sanitizeString no longer strips characters, so validate the
-              // charset here instead of relying on it. Accepts both the legacy
-              // hex ids and the UUIDs the client now generates.
-              id: typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,40}$/.test(item.id.trim())
-                ? item.id.trim()
-                : generateItemId(),
+              // Item ids are machine-generated identifiers, not user prose, so
+              // the charset is validated here rather than left to
+              // sanitizeString (which no longer strips anything). Collisions
+              // get a fresh id -- see stableItemId().
+              id: stableItemId(item.id, usedItemIds),
               description: sanitizeString(item.description || item.item || item.name || '', 500),
               priority: item.priority && ['high', 'medium', 'low'].includes(item.priority) 
                 ? item.priority 
@@ -801,7 +1015,7 @@ app.get('/api/groups/:groupId', readLimiter, async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT data, deleted_at FROM groups WHERE group_id = $1',
+      'SELECT data, deleted_at, version FROM groups WHERE group_id = $1',
       [groupId]
     );
 
@@ -854,7 +1068,10 @@ app.get('/api/groups/:groupId', readLimiter, async (req, res) => {
       success: true,
       access: 'member',
       data: filterGroupForViewer(row.data, member.member_name),
-      viewer: { memberName: member.member_name, isCreator: member.is_creator }
+      viewer: { memberName: member.member_name, isCreator: member.is_creator },
+      // The row's version as of this read. Action endpoints return the version
+      // their write produced, so a client can tell a stale poll from a fresh one.
+      version: row.version
     });
   } catch (error) {
     console.error('Error loading group:', error);
@@ -1155,6 +1372,255 @@ app.get('/api/groups/:groupId/thank-you', readLimiter, async (req, res) => {
   }
 });
 
+// ===============================================================
+// Granular action endpoints (brief 7.2) -- claim, unclaim, purchase
+// ---------------------------------------------------------------
+// Every action used to serialize the whole group and POST it, while clients
+// replaced their local state every 10 seconds. Two people acting inside the
+// same window meant one change vanished with no error -- and the shape that
+// takes in this app is two people buying the same gift, which is precisely
+// what the product exists to prevent.
+//
+// These handlers read, modify and write inside ONE transaction with the group
+// row locked, so the server decides who got there first, and the loser is told.
+// Items are addressed by their stable id, never by array index: indices move
+// under concurrent edits, which is the same bug wearing a different hat.
+// ===============================================================
+
+// Locate an item anywhere in the group. The endpoint paths carry no username
+// -- an id identifies one item across the whole group, an invariant held by
+// stableItemId() on write and by the startup backfill for older rows.
+function findItemById(blob, itemId) {
+  const users = (blob && blob.users) || {};
+
+  for (const [ownerName, user] of Object.entries(users)) {
+    if (!user || !Array.isArray(user.items)) continue;
+
+    const index = user.items.findIndex(item => item && item.id === itemId);
+    if (index !== -1) return { ownerName, item: user.items[index], index };
+  }
+
+  return null;
+}
+
+// Keep the claim fields well-formed. These handlers write into the stored blob
+// directly rather than through sanitizeGroupData(), so the normalising that
+// function would have done has to happen here.
+function normalizeClaimFields(item) {
+  item.claimedBy = Array.isArray(item.claimedBy)
+    ? item.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100)).filter(Boolean)
+    : [];
+  item.splitWith = Array.isArray(item.splitWith)
+    ? item.splitWith.slice(0, 10).map(name => sanitizeString(name, 100)).filter(Boolean)
+    : [];
+  item.purchased = Boolean(item.purchased);
+
+  // An item nobody is claiming cannot be purchased. Without this an unclaim
+  // would leave a "PURCHASED" badge with no buyer behind it.
+  if (item.claimedBy.length === 0) item.purchased = false;
+}
+
+// What an actor is told about an item after acting on it. Only ever returned
+// to someone who is NOT the item's owner, so full claim state is fine here --
+// owners are refused these endpoints outright.
+function claimStatePayload(item) {
+  return {
+    id: item.id,
+    claimedBy: Array.isArray(item.claimedBy) ? item.claimedBy : [],
+    purchased: Boolean(item.purchased),
+    splitWith: Array.isArray(item.splitWith) ? item.splitWith : []
+  };
+}
+
+// Shared scaffolding for the three handlers. `apply` receives the live item and
+// returns one of:
+//   { changed: true }                     -- write it
+//   { unchanged: true }                   -- already in the desired state
+//   { conflict: 'code', message: '...' }  -- somebody got there first (409)
+async function runItemAction(req, res, apply) {
+  const groupId = req.params.groupId;
+  const itemId = req.params.itemId;
+
+  if (!isValidGroupId(groupId)) {
+    return res.status(400).json({ success: false, message: 'Invalid group ID format' });
+  }
+  if (typeof itemId !== 'string' || !ITEM_ID_PATTERN.test(itemId)) {
+    return res.status(400).json({ success: false, message: 'Invalid item ID format' });
+  }
+
+  const token = readMemberToken(req);
+
+  try {
+    const payload = await withTransaction(async (client) => {
+      const groupResult = await client.query(
+        'SELECT data, deleted_at, version FROM groups WHERE group_id = $1 FOR UPDATE',
+        [groupId]
+      );
+
+      if (groupResult.rows.length === 0) {
+        return { httpStatus: 404, body: { success: false, message: 'Group not found' } };
+      }
+
+      const row = groupResult.rows[0];
+      if (row.deleted_at) {
+        return { httpStatus: 409, body: { success: false, code: 'group_reset', reset: resetStatePayload(row) } };
+      }
+
+      // Any authenticated member may claim, unclaim and mark purchased on other
+      // people's items (brief 5.5). Membership is the whole check.
+      const member = token ? await resolveMember(client, groupId, token) : null;
+      if (!member) {
+        return {
+          httpStatus: 401,
+          body: {
+            success: false,
+            code: token ? 'invalid_token' : 'auth_required',
+            message: 'This device is not signed in to the group.'
+          }
+        };
+      }
+
+      const blob = row.data || {};
+      const found = findItemById(blob, itemId);
+
+      if (!found) {
+        // Deleted, or this client is looking at a copy of the group from before
+        // it was. Either way the answer is the same: re-read.
+        return {
+          httpStatus: 404,
+          body: {
+            success: false,
+            code: 'item_not_found',
+            message: 'That item is no longer on the list.'
+          }
+        };
+      }
+
+      // Nobody coordinates gifts on their own list. Refusing here is also what
+      // keeps these endpoints from becoming a way to ask "is my own item
+      // claimed yet?" -- the question Phase 3 exists to refuse.
+      if (found.ownerName === member.member_name) {
+        return {
+          httpStatus: 403,
+          body: {
+            success: false,
+            code: 'own_item',
+            message: 'You cannot claim gifts on your own wishlist.'
+          }
+        };
+      }
+
+      const outcome = apply(found.item, member, req.body || {});
+
+      if (outcome.conflict) {
+        return {
+          httpStatus: 409,
+          body: {
+            success: false,
+            code: outcome.conflict,
+            message: outcome.message,
+            item: claimStatePayload(found.item),
+            version: row.version
+          }
+        };
+      }
+
+      if (outcome.unchanged) {
+        // Idempotent: a double tap, or a retry after a dropped response, is
+        // not an error and does not deserve a write.
+        return {
+          httpStatus: 200,
+          body: { success: true, item: claimStatePayload(found.item), version: row.version }
+        };
+      }
+
+      normalizeClaimFields(found.item);
+
+      const updated = await client.query(
+        `UPDATE groups
+            SET data = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP
+          WHERE group_id = $2
+        RETURNING version`,
+        [JSON.stringify(blob), groupId]
+      );
+
+      return {
+        httpStatus: 200,
+        body: {
+          success: true,
+          item: claimStatePayload(found.item),
+          version: updated.rows[0].version
+        }
+      };
+    });
+
+    res.status(payload.httpStatus).json(payload.body);
+  } catch (error) {
+    console.error('Error applying item action:', error);
+    res.status(500).json({ success: false, message: 'Could not apply that change' });
+  }
+}
+
+// Claim an item. This is the check the whole phase is for: if somebody else
+// already holds it, the second person is told, rather than silently winning.
+app.post('/api/groups/:groupId/items/:itemId/claim', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, (item, member) => {
+    const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+
+    if (claimedBy.includes(member.member_name)) return { unchanged: true };
+
+    if (claimedBy.length > 0) {
+      return {
+        conflict: 'already_claimed',
+        message: 'Someone just claimed this gift.'
+      };
+    }
+
+    item.claimedBy = [member.member_name];
+    return { changed: true };
+  });
+});
+
+// Give up a claim. Removes only the caller -- on a split gift the other
+// claimers keep theirs.
+app.post('/api/groups/:groupId/items/:itemId/unclaim', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, (item, member) => {
+    const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+    if (!claimedBy.includes(member.member_name)) return { unchanged: true };
+
+    item.claimedBy = claimedBy.filter(name => name !== member.member_name);
+    item.splitWith = Array.isArray(item.splitWith)
+      ? item.splitWith.filter(name => name !== member.member_name)
+      : [];
+
+    return { changed: true };
+  });
+});
+
+// Mark a gift bought, or un-mark it. Toggles when the body says nothing, so the
+// endpoint matches the brief; the client sends the state it wants explicitly,
+// which keeps a double tap from undoing itself.
+app.post('/api/groups/:groupId/items/:itemId/purchase', writeLimiter, async (req, res) => {
+  await runItemAction(req, res, (item, member, body) => {
+    const claimedBy = Array.isArray(item.claimedBy) ? item.claimedBy : [];
+
+    if (!claimedBy.includes(member.member_name)) {
+      return {
+        conflict: 'not_claimed_by_you',
+        message: claimedBy.length > 0
+          ? 'Someone else is buying this one now.'
+          : 'Claim this gift before marking it bought.'
+      };
+    }
+
+    const desired = typeof body.purchased === 'boolean' ? body.purchased : !item.purchased;
+    if (Boolean(item.purchased) === desired) return { unchanged: true };
+
+    item.purchased = desired;
+    return { changed: true };
+  });
+});
+
 // POST/UPDATE group data
 app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
   try {
@@ -1182,24 +1648,58 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
     // Sanitize group data
     const sanitizedData = sanitizeGroupData(groupData);
 
-    // Check if group exists
+    // A brand new group has nothing to race against and no claim state to
+    // protect, so it keeps the simple path (and the stricter creation limiter).
     const existingGroup = await pool.query(
-      'SELECT data, deleted_at FROM groups WHERE group_id = $1',
+      'SELECT 1 FROM groups WHERE group_id = $1',
       [groupId]
     );
 
-    if (existingGroup.rows.length > 0) {
-      const stored = existingGroup.rows[0];
+    if (existingGroup.rows.length === 0) {
+      return groupCreationLimiter(req, res, async () => {
+        try {
+          await pool.query(
+            'INSERT INTO groups (group_id, data, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
+            [groupId, JSON.stringify(sanitizedData)]
+          );
+          res.json({ success: true, message: 'Group created successfully' });
+        } catch (error) {
+          console.error('Error creating group:', error);
+          res.status(500).json({
+            success: false,
+            message: 'Error creating group'
+          });
+        }
+      });
+    }
+
+    // Updating an existing group happens inside one transaction with the row
+    // locked. Read-modify-write across two pool queries was a lost update
+    // waiting to happen, which is the whole subject of this phase.
+    const payload = await withTransaction(async (client) => {
+      const groupResult = await client.query(
+        'SELECT data, deleted_at FROM groups WHERE group_id = $1 FOR UPDATE',
+        [groupId]
+      );
+
+      if (groupResult.rows.length === 0) {
+        return { httpStatus: 404, body: { success: false, message: 'Group not found' } };
+      }
+
+      const stored = groupResult.rows[0];
 
       // Writes to a reset group are refused. Otherwise an open tab's next
       // poll-and-save would quietly resurrect it.
       if (stored.deleted_at) {
-        return res.status(409).json({
-          success: false,
-          code: 'group_reset',
-          message: 'This group was reset.',
-          reset: resetStatePayload(stored)
-        });
+        return {
+          httpStatus: 409,
+          body: {
+            success: false,
+            code: 'group_reset',
+            message: 'This group was reset.',
+            reset: resetStatePayload(stored)
+          }
+        };
       }
 
       // ---------------------------------------------------------------
@@ -1217,24 +1717,26 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
       // heals from, by re-claiming the stored name and retrying once.
       // ---------------------------------------------------------------
       const token = readMemberToken(req);
-      const member = token ? await resolveMember(pool, groupId, token) : null;
+      const member = token ? await resolveMember(client, groupId, token) : null;
 
       if (!member) {
-        return res.status(401).json({
-          success: false,
-          code: 'auth_required',
-          message: 'This device needs to sign back in to the group before saving.'
-        });
+        return {
+          httpStatus: 401,
+          body: {
+            success: false,
+            code: 'auth_required',
+            message: 'This device needs to sign back in to the group before saving.'
+          }
+        };
       }
-      await touchMember(pool, member);
 
       const storedBlob = stored.data || {};
 
-      // Put back the claim data we stripped from this member's own items on
-      // the way out, before anything else reads the incoming blob. Without
-      // this, every save a member makes would wipe the claims on their own
-      // list -- the write path undoing the read path.
-      restoreOwnItemPrivateFields(sanitizedData, storedBlob, member.member_name);
+      // Claim state is authoritative in storage. This puts back what filtering
+      // stripped from the writer's own items, and stops a stale snapshot of
+      // everyone else's claims from overwriting claims made since this tab
+      // last polled.
+      reconcileClaimState(sanitizedData, storedBlob, member.member_name);
 
       // ---------------------------------------------------------------
       // Creator gate on the blob write (brief 5.5), deliberately narrow.
@@ -1259,23 +1761,26 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
 
       if (removedUsers.length > 0 || creatorChanged) {
         const allowed = await hasCreatorAuthority(
-          pool, groupId, storedBlob, member, readActingName(req)
+          client, groupId, storedBlob, member, readActingName(req)
         );
 
         if (!allowed) {
-          return res.status(403).json({
-            success: false,
-            code: 'creator_only',
-            message: removedUsers.length > 0
-              ? 'Only the group creator can remove someone from the group.'
-              : 'Only the group creator can change who owns this group.'
-          });
+          return {
+            httpStatus: 403,
+            body: {
+              success: false,
+              code: 'creator_only',
+              message: removedUsers.length > 0
+                ? 'Only the group creator can remove someone from the group.'
+                : 'Only the group creator can change who owns this group.'
+            }
+          };
         }
 
         // Removing a member takes their devices with them, so the name is
         // free again and the FK does not strand rows.
         if (removedUsers.length > 0) {
-          await pool.query(
+          await client.query(
             'DELETE FROM group_members WHERE group_id = $1 AND member_name = ANY($2::varchar[])',
             [groupId, removedUsers]
           );
@@ -1286,33 +1791,31 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
           scrubNamesFromClaims(sanitizedData, removedUsers);
         }
       }
-    }
 
-    if (existingGroup.rows.length === 0) {
-      // Apply stricter rate limit for new groups
-      groupCreationLimiter(req, res, async () => {
-        try {
-          await pool.query(
-            'INSERT INTO groups (group_id, data, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
-            [groupId, JSON.stringify(sanitizedData)]
-          );
-          res.json({ success: true, message: 'Group created successfully' });
-        } catch (error) {
-          console.error('Error creating group:', error);
-          res.status(500).json({ 
-            success: false, 
-            message: 'Error creating group' 
-          });
-        }
-      });
-    } else {
-      // Update existing group
-      await pool.query(
-        'UPDATE groups SET data = $1, updated_at = CURRENT_TIMESTAMP WHERE group_id = $2',
+      const updated = await client.query(
+        `UPDATE groups
+            SET data = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP
+          WHERE group_id = $2
+        RETURNING version`,
         [JSON.stringify(sanitizedData), groupId]
       );
-      res.json({ success: true, message: 'Group updated successfully' });
-    }
+
+      return {
+        httpStatus: 200,
+        member,
+        body: {
+          success: true,
+          message: 'Group updated successfully',
+          version: updated.rows[0].version
+        }
+      };
+    });
+
+    // Freshness bookkeeping, outside the transaction: it must never be the
+    // reason a member's save rolls back.
+    if (payload.member) await touchMember(pool, payload.member);
+
+    res.status(payload.httpStatus).json(payload.body);
   } catch (error) {
     console.error('Error saving group:', error);
     res.status(500).json({ 
