@@ -591,6 +591,95 @@
             border: 1px solid #f5576c;
         }
 
+        /* Notice line on the join screen -- used when a device has to sign
+           back in, or when a suggested alternative name is pre-filled. */
+        .join-notice {
+            margin: 0 0 16px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #fff4e5;
+            border: 1px solid #f0b27a;
+            color: #8a5218;
+            font-size: 14px;
+            line-height: 1.45;
+            text-align: left;
+        }
+
+        /* "Is this you?" choices. Equal weight, stacked, so neither option is
+           the obvious one to click (brief 5.4). */
+        .disambiguation-choices {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .disambiguation-choices button {
+            margin: 0;
+            width: 100%;
+            font-size: 15px;
+            padding: 14px 16px;
+            line-height: 1.35;
+            white-space: normal;
+        }
+
+        /* Persistent undo affordance after a reset. */
+        .undo-reset-banner {
+            margin-top: 20px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #fff4e5;
+            border: 1px solid #f0b27a;
+            color: #8a5218;
+            font-size: 14px;
+            line-height: 1.45;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .undo-reset-banner button {
+            width: auto;
+            margin: 0;
+            padding: 8px 18px;
+            font-size: 14px;
+        }
+
+        /* Device markers in the member list (brief 5.6). Identity here is
+           claimed on trust, so it is made visible instead of enforced. */
+        .device-marker {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .new-device-note {
+            margin: 0 0 15px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #eef5ff;
+            border: 1px solid #b9d3f5;
+            color: #24486e;
+            font-size: 13px;
+            line-height: 1.45;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .new-device-note button {
+            width: auto;
+            margin: 0;
+            padding: 4px 10px;
+            font-size: 12px;
+            background: transparent !important;
+            color: #24486e !important;
+            box-shadow: none;
+            border: 1px solid #b9d3f5;
+        }
+
         /* Non-blocking toast for writes the server rejected. Fixed to the
            viewport so it is visible from any screen without moving content. */
         .save-error-toast {
@@ -717,12 +806,28 @@
             <h1>Join the Group</h1>
             <p class="tagline" id="groupNameDisplay"></p>
 
+            <div id="joinNotice" class="join-notice" style="display: none;"></div>
+
             <div class="input-group">
                 <label for="usernameInput">Enter Your Name</label>
                 <input type="text" id="usernameInput" placeholder="Your name" maxlength="100">
             </div>
 
             <button onclick="joinGroup()">Join Group</button>
+        </div>
+
+        <!-- Group Was Reset Screen -->
+        <div id="resetStateScreen" class="card hidden">
+            <h1>🗑️ Group Reset</h1>
+            <p class="tagline"><strong id="resetStateGroupName"></strong> was reset by the group creator.</p>
+            <p style="text-align: center; color: #666; margin: 15px 0;" id="resetStateDetail"></p>
+
+            <div id="resetStateUndoWrap" style="display: none;">
+                <button onclick="undoReset()">↩️ Undo the reset and restore everything</button>
+            </div>
+
+            <button onclick="window.location.hash = ''; window.location.reload();"
+                    style="background: #999; margin-top: 10px;">Start a new group</button>
         </div>
 
         <!-- Main App Screen -->
@@ -813,7 +918,18 @@
             <div id="wishlistsContainer" class="wishlists-grid"></div>
 
             <div id="resetGroupSection" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0; display: none;">
-                <button onclick="resetGroup()" class="btn-danger">🗑️ Reset Group (Creator Only)</button>
+                <button onclick="showResetConfirm()" class="btn-danger">🗑️ Reset Group (Creator Only)</button>
+            </div>
+
+            <!-- Persistent undo affordance after a reset. Deliberately not a
+                 toast: the person who just did this needs it to still be there
+                 while they work out what happened. -->
+            <div id="undoResetBanner" class="undo-reset-banner" style="display: none;">
+                <div>
+                    <strong>Group reset.</strong>
+                    <span id="undoResetDetail"></span>
+                </div>
+                <button onclick="undoReset()">Undo</button>
             </div>
         </div>
     </div>
@@ -973,6 +1089,48 @@
         </div>
     </div>
 
+    <!-- "Is this you?" prompt (brief 5.4).
+         Item count and join date only -- never item names. -->
+    <div id="disambiguationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="disambiguationTitle"></h2>
+                <button class="close-btn" onclick="hideModal('disambiguationModal')">&times;</button>
+            </div>
+            <p id="disambiguationDetail" style="text-align: center; color: #666; font-size: 15px; margin-bottom: 20px;"></p>
+
+            <!-- Both options get equal weight on purpose: two real people with
+                 the same name is the case this exists to catch. -->
+            <div class="disambiguation-choices">
+                <button onclick="confirmSameMember()">That's me — this is another device</button>
+                <button onclick="chooseDifferentName()">I'm a different person with the same name</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset confirmation (brief 5.7): typing the group name is required. -->
+    <div id="resetConfirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🗑️ Reset this group?</h2>
+                <button class="close-btn" onclick="hideModal('resetConfirmModal')">&times;</button>
+            </div>
+            <p style="color: #444; line-height: 1.6;">
+                This clears <strong id="resetConfirmGroupName"></strong> for everyone:
+                every wishlist, every item, and every claim.
+                <strong>It can be undone for 30 days</strong>, after which it is
+                permanent.
+            </p>
+            <div class="input-group">
+                <label for="resetConfirmInput">Type the group name to confirm</label>
+                <input type="text" id="resetConfirmInput" placeholder="Group name" maxlength="100"
+                       autocomplete="off" oninput="updateResetConfirmState()">
+            </div>
+            <button id="resetConfirmButton" class="btn-danger" onclick="resetGroup()" disabled>Reset Group</button>
+            <button onclick="hideModal('resetConfirmModal')" style="background: #999; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
     <!-- Thank You Modal -->
     <div id="thankYouModal" class="modal">
         <div class="modal-content">
@@ -1017,6 +1175,155 @@
         let groupId = null;
         let currentTheme = 'Christmas'; // Track current theme
         let expandedWishlists = {}; // Track which wishlists are expanded
+
+        // ============================================================
+        // Member identity (brief section 5)
+        // ------------------------------------------------------------
+        // The server issues a per-device token when you claim a name. It is
+        // stored per group, because one person can be in several groups under
+        // different names. None of this is visible in the normal flow -- no
+        // passwords, no PINs, no codes to keep. If a device loses its token it
+        // simply claims the name again.
+        // ============================================================
+
+        let memberToken = null;       // token for the current group, if we hold one
+        let isGroupCreator = false;   // server's answer, used for UX gating only
+        let groupMembers = [];        // from /members, for the device-count markers
+        let groupExistsOnServer = false;
+        let pendingJoinName = null;   // name awaiting the "is this you?" answer
+        let resetState = null;        // set when the group has been reset
+
+        function memberTokenKey(id) {
+            return `memberToken_${id}`;
+        }
+
+        function loadMemberToken(id) {
+            try {
+                return localStorage.getItem(memberTokenKey(id));
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function storeMemberToken(id, token) {
+            memberToken = token;
+            try {
+                localStorage.setItem(memberTokenKey(id), token);
+            } catch (error) {
+                // Private browsing and full quotas both land here. The token
+                // still works for this page view; the user just re-claims their
+                // name next time, which is invisible to them.
+                console.warn('Could not persist member token:', error);
+            }
+        }
+
+        function clearMemberToken(id) {
+            memberToken = null;
+            try {
+                localStorage.removeItem(memberTokenKey(id));
+            } catch (error) {
+                /* nothing useful to do */
+            }
+        }
+
+        // Every authenticated call goes through here.
+        //
+        // The token travels in a header, never a query string -- query strings
+        // land in server logs and Referer headers.
+        //
+        // X-Member-Name only matters on legacy groups whose creator has never
+        // claimed a device; the server ignores it otherwise.
+        async function apiFetch(url, options = {}, allowRetry = true) {
+            const headers = Object.assign({}, options.headers || {});
+            if (memberToken) headers['X-Member-Token'] = memberToken;
+            if (currentUser) headers['X-Member-Name'] = encodeURIComponent(currentUser);
+
+            const response = await fetch(url, Object.assign({}, options, { headers }));
+
+            // Self-healing (brief 5.10, extended): a token the server no longer
+            // recognises should not dump the user back to the join screen if we
+            // can quietly fix it. Re-claim the stored name, then retry once.
+            // Only if that fails do we actually interrupt them.
+            if (response.status === 401 && allowRetry && currentUser && groupId) {
+                clearMemberToken(groupId);
+                const rejoined = await requestJoin(currentUser, { confirmExisting: true, silent: true });
+
+                if (rejoined && rejoined.token) {
+                    storeMemberToken(groupId, rejoined.token);
+                    isGroupCreator = Boolean(rejoined.isCreator);
+                    return apiFetch(url, options, false);
+                }
+
+                if (rejoined && rejoined.reset) {
+                    resetState = rejoined.reset;
+                    showResetScreen();
+                    return response;
+                }
+
+                handleLostIdentity();
+            }
+
+            return response;
+        }
+
+        // Ask the server to claim a name. Returns the parsed body, or null on a
+        // transport failure.
+        async function requestJoin(name, { confirmExisting = false, silent = false } = {}) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}/join`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, confirmExisting })
+                });
+
+                const result = await response.json().catch(() => null);
+
+                if (!result || (!result.success && !silent)) {
+                    showSaveError(result && result.message ? result.message : null);
+                    return null;
+                }
+
+                return result;
+            } catch (error) {
+                console.error('Error joining group:', error);
+                if (!silent) showSaveError('We could not reach the server.');
+                return null;
+            }
+        }
+
+        // The token is gone and re-claiming did not work. Say so plainly rather
+        // than letting writes fail silently.
+        function handleLostIdentity() {
+            if (groupId) clearMemberToken(groupId);
+            isGroupCreator = false;
+            const input = document.getElementById('usernameInput');
+            if (input && currentUser) input.value = currentUser;
+            showJoinNotice('This device needs to sign back in to the group. Enter your name to continue.');
+            showScreen('join');
+        }
+
+        // Creator gating in the UI.
+        //
+        // Prefer the server's answer (derived from the token). Fall back to the
+        // display-name comparison only for a legacy group whose creator has not
+        // claimed a device yet -- exactly the case the server still honours.
+        // This is for hiding buttons; the server is the enforcer.
+        function canActAsCreator() {
+            if (isGroupCreator) return true;
+            if (memberToken) return false;
+            return Boolean(groupData && groupData.createdBy) && groupData.createdBy === currentUser;
+        }
+
+        function showJoinNotice(message) {
+            const notice = document.getElementById('joinNotice');
+            if (!notice) return;
+            if (message) {
+                notice.textContent = message;
+                notice.style.display = 'block';
+            } else {
+                notice.style.display = 'none';
+            }
+        }
 
         // Theme configurations
         const themes = {
@@ -1283,19 +1590,27 @@
                 }
             }
 
+            // Restore identity BEFORE loading the group: loadGroup() needs to
+            // know whether this device already holds a token, and a remembered
+            // name with no token is the Phase 2 migration path (brief 5.9).
+            let savedUsername = null;
+            try {
+                savedUsername = localStorage.getItem('currentUsername');
+            } catch (error) {
+                savedUsername = null;
+            }
+            if (savedUsername) {
+                currentUser = savedUsername;
+            }
+
             // Check if there's a group ID in the URL
             const hash = window.location.hash.substring(1);
             if (hash) {
                 groupId = hash;
+                memberToken = loadMemberToken(groupId);
                 loadGroup();
             } else {
                 showScreen('welcome');
-            }
-
-            // Check for saved username
-            const savedUsername = localStorage.getItem('currentUsername');
-            if (savedUsername) {
-                currentUser = savedUsername;
             }
 
             // Poll for updates every 10 seconds
@@ -1340,6 +1655,7 @@
             document.getElementById('welcomeScreen').classList.add('hidden');
             document.getElementById('joinScreen').classList.add('hidden');
             document.getElementById('appScreen').classList.add('hidden');
+            document.getElementById('resetStateScreen').classList.add('hidden');
 
             if (screen === 'welcome') {
                 document.getElementById('welcomeScreen').classList.remove('hidden');
@@ -1383,6 +1699,11 @@
 
             // Generate random group ID
             groupId = generateId();
+            // Nothing has been written to the server yet; joinGroup() writes it
+            // and then claims the creator's name.
+            groupExistsOnServer = false;
+            memberToken = null;
+            isGroupCreator = false;
             
             // Initialize group data
             groupData = {
@@ -1408,6 +1729,13 @@
         }
 
         // Join Group
+        //
+        // Two shapes, depending on whether the group exists on the server yet:
+        //
+        //  - Brand new group: this browser holds the only copy, so write it
+        //    first, then claim the name. The claimer becomes the creator.
+        //  - Existing group: claim the name FIRST. If it turns out to be taken
+        //    we must not have already written the member into the blob.
         async function joinGroup() {
             const username = document.getElementById('usernameInput').value.trim();
 
@@ -1416,49 +1744,199 @@
                 return;
             }
 
-            if (!groupData.users[username]) {
-                groupData.users[username] = { items: [] };
+            showJoinNotice(null);
+
+            if (!groupExistsOnServer) {
+                if (!groupData.users[username]) {
+                    groupData.users[username] = { items: [] };
+                }
+                if (!groupData.createdBy) {
+                    groupData.createdBy = username;
+                }
+
+                currentUser = username;
+                rememberUsername(username);
+
+                const saved = await saveData();
+                if (!saved) return;
+                groupExistsOnServer = true;
             }
 
-            if (!groupData.createdBy) {
-                groupData.createdBy = username;
+            await claimName(username, { confirmExisting: false });
+        }
+
+        // Claim a name on the server and, if it works, enter the app.
+        async function claimName(username, { confirmExisting = false } = {}) {
+            const result = await requestJoin(username, { confirmExisting });
+            if (!result) return false;
+
+            if (result.reset) {
+                resetState = result.reset;
+                showResetScreen();
+                return false;
             }
 
-            currentUser = username;
-            localStorage.setItem('currentUsername', username);
+            if (result.status === 'name_taken') {
+                pendingJoinName = username;
+                showDisambiguationPrompt(result);
+                return false;
+            }
 
-            // Save to database
-            await saveData();
+            if (!result.token) return false;
 
-            // Mark app as used
+            currentUser = result.name;
+            rememberUsername(result.name);
+            storeMemberToken(groupId, result.token);
+            isGroupCreator = Boolean(result.isCreator);
+
             markAppUsed();
             checkDonationBanner();
 
-            // Show app
+            // Re-read the group: joining may have added us to it server-side.
+            await loadGroup(true);
             showAppScreen();
+            return true;
+        }
+
+        function rememberUsername(name) {
+            try {
+                localStorage.setItem('currentUsername', name);
+            } catch (error) {
+                console.warn('Could not remember username:', error);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // "Is this you?" prompt (brief 5.4)
+        //
+        // Shows an item COUNT and a join date. Never item names -- a stranger
+        // must not be able to read a wishlist off the join screen.
+        //
+        // Both buttons carry equal weight on purpose. Two real Johns is the
+        // case this exists to catch, and people click the bigger button.
+        // ---------------------------------------------------------------
+        function showDisambiguationPrompt(info) {
+            const name = info.name;
+            const itemLabel = info.itemCount === 1 ? '1 item' : `${info.itemCount} items`;
+
+            let joinedLabel = '';
+            if (info.joinedAt) {
+                const joined = new Date(info.joinedAt);
+                if (!isNaN(joined)) {
+                    joinedLabel = ` · joined ${joined.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+                }
+            }
+
+            const deviceLabel = info.deviceCount > 1 ? ` · ${info.deviceCount} devices` : '';
+
+            document.getElementById('disambiguationTitle').textContent =
+                `${name} already has a list here.`;
+            document.getElementById('disambiguationDetail').textContent =
+                `${itemLabel}${joinedLabel}${deviceLabel}`;
+
+            // Make sure the join screen is what sits behind the modal, so
+            // dismissing it leaves the user somewhere sensible.
+            if (groupData && groupData.groupName) {
+                document.getElementById('groupNameDisplay').textContent = groupData.groupName;
+            }
+            showScreen('join');
+            showModal('disambiguationModal');
+        }
+
+        // "That's me - this is another device"
+        async function confirmSameMember() {
+            const name = pendingJoinName;
+            hideModal('disambiguationModal');
+            if (!name) return;
+            await claimName(name, { confirmExisting: true });
+        }
+
+        // "I'm a different John" -- back to the name field with a suggestion
+        // pre-filled, which they can edit.
+        function chooseDifferentName() {
+            const name = pendingJoinName || '';
+            hideModal('disambiguationModal');
+
+            const input = document.getElementById('usernameInput');
+            if (input) {
+                input.value = suggestAlternativeName(name);
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+            }
+
+            showJoinNotice('Pick a name that tells you apart — you can change this before joining.');
+            showScreen('join');
+            pendingJoinName = null;
+        }
+
+        function suggestAlternativeName(name) {
+            const base = (name || '').trim();
+            if (!base) return '';
+
+            // "John" -> "John B.", then B, C, D... against names already in the
+            // group so the suggestion is not itself taken.
+            const taken = new Set(Object.keys((groupData && groupData.users) || {}));
+            for (let i = 1; i < 26; i++) {
+                const candidate = `${base} ${String.fromCharCode(65 + i)}.`;
+                if (!taken.has(candidate)) return candidate;
+            }
+            return `${base} 2`;
         }
 
         // Load Group
         async function loadGroup(silent = false) {
             try {
-                const response = await fetch(`/api/groups/${groupId}`);
-                const result = await response.json();
+                const response = await apiFetch(`/api/groups/${groupId}`);
+                const result = await response.json().catch(() => null);
+
+                if (!result) {
+                    if (!silent) alert('Error loading group');
+                    return;
+                }
+
+                // The group was reset. Members get told that, not a 404.
+                if (result.reset) {
+                    resetState = result.reset;
+                    groupExistsOnServer = true;
+                    showResetScreen();
+                    return;
+                }
 
                 if (result.success && result.data) {
                     groupData = result.data;
+                    groupExistsOnServer = true;
+                    resetState = null;
+
+                    // The server tells us who it thinks we are. Creator status
+                    // comes from the token, not from matching a display name.
+                    if (result.viewer) {
+                        currentUser = result.viewer.memberName;
+                        isGroupCreator = Boolean(result.viewer.isCreator);
+                    }
 
                     // Drop requests the owner has already answered by editing the item
-                    if (resolveInfoRequests()) {
+                    if (currentUser && resolveInfoRequests()) {
                         await saveData();
                     }
-                    
+
                     // Apply theme based on holiday type
                     if (groupData.holiday) {
                         applyTheme(groupData.holiday);
                     }
 
+                    // A returning user from before member tokens existed: they
+                    // have a remembered name but nothing to prove it. Claiming
+                    // the name is the ordinary join flow, so for most people
+                    // this succeeds and they never see anything (brief 5.9).
+                    if (currentUser && !memberToken) {
+                        const claimed = await claimName(currentUser, { confirmExisting: false });
+                        if (!claimed) return;
+                        return;
+                    }
+
                     // If user is already logged in, show app
                     if (currentUser && groupData.users[currentUser]) {
+                        refreshMemberDevices();
                         showAppScreen();
                     } else {
                         // Show join screen
@@ -1475,6 +1953,108 @@
                 if (!silent) {
                     alert('Error loading group');
                 }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Device transparency (brief 5.6)
+        //
+        // Identity is claimed on trust, so make it visible: the member list
+        // shows how many devices each person has, and a new one gets a quiet
+        // line rather than a modal.
+        // ---------------------------------------------------------------
+        let knownDeviceCounts = null;
+        let newDeviceNotices = [];
+
+        async function refreshMemberDevices() {
+            try {
+                const response = await fetch(`/api/groups/${groupId}/members`);
+                const result = await response.json().catch(() => null);
+                if (!result || !result.success) return;
+
+                groupMembers = result.members || [];
+
+                const counts = {};
+                groupMembers.forEach(member => { counts[member.name] = member.deviceCount; });
+
+                if (knownDeviceCounts) {
+                    groupMembers.forEach(member => {
+                        const previous = knownDeviceCounts[member.name];
+                        if (previous !== undefined && member.deviceCount > previous) {
+                            const latest = member.devices[member.devices.length - 1];
+                            newDeviceNotices.push({
+                                name: member.name,
+                                label: latest ? latest.label : 'a new device'
+                            });
+                        }
+                    });
+                }
+
+                knownDeviceCounts = counts;
+                renderWishlists();
+            } catch (error) {
+                // Purely informational; never worth interrupting anyone over.
+                console.warn('Could not load member devices:', error);
+            }
+        }
+
+        function deviceCountFor(name) {
+            const member = groupMembers.find(entry => entry.name === name);
+            return member ? member.deviceCount : 0;
+        }
+
+        function dismissDeviceNotice(index) {
+            newDeviceNotices.splice(index, 1);
+            renderWishlists();
+        }
+
+        // ---------------------------------------------------------------
+        // "This group was reset" state (brief 5.7)
+        // ---------------------------------------------------------------
+        function showResetScreen() {
+            if (!resetState) return;
+
+            const nameEl = document.getElementById('resetStateGroupName');
+            const detailEl = document.getElementById('resetStateDetail');
+            const undoWrap = document.getElementById('resetStateUndoWrap');
+
+            if (nameEl) nameEl.textContent = resetState.groupName || 'This group';
+
+            if (detailEl) {
+                const until = new Date(resetState.undoAvailableUntil);
+                detailEl.textContent = resetState.undoAvailable && !isNaN(until)
+                    ? `The wishlists are still recoverable until ${until.toLocaleDateString()}.`
+                    : 'The 30-day window to undo this reset has passed.';
+            }
+
+            // The undo affordance persists -- it is not a toast that vanishes
+            // while the person is still working out what happened.
+            if (undoWrap) {
+                undoWrap.style.display = resetState.undoAvailable ? 'block' : 'none';
+            }
+
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('joinScreen').classList.add('hidden');
+            document.getElementById('appScreen').classList.add('hidden');
+            document.getElementById('resetStateScreen').classList.remove('hidden');
+        }
+
+        async function undoReset() {
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/undo-reset`, { method: 'POST' });
+                const result = await response.json().catch(() => null);
+
+                if (result && result.success) {
+                    resetState = null;
+                    document.getElementById('resetStateScreen').classList.add('hidden');
+                    await loadGroup();
+                    return;
+                }
+
+                showSaveError(result && result.message ? result.message : null);
+            } catch (error) {
+                console.error('Error undoing reset:', error);
+                showSaveError('We could not reach the server.');
             }
         }
 
@@ -1504,11 +2084,7 @@
 
             // Show/hide reset button based on creator status
             const resetSection = document.getElementById('resetGroupSection');
-            if (currentUser === groupData.createdBy) {
-                resetSection.style.display = 'block';
-            } else {
-                resetSection.style.display = 'none';
-            }
+            resetSection.style.display = canActAsCreator() ? 'block' : 'none';
 
             // Show/hide "Who Do I Thank?" button if event date has passed
             checkAndShowThankYouButton();
@@ -1636,6 +2212,20 @@
             const container = document.getElementById('wishlistsContainer');
             container.innerHTML = '';
 
+            // A new device on an existing member is surfaced as a quiet line,
+            // not a modal (brief 5.6). Since anyone can claim a name, the
+            // group seeing that a name gained a device IS the enforcement
+            // mechanism in this design.
+            newDeviceNotices.forEach((notice, index) => {
+                const line = document.createElement('div');
+                line.className = 'new-device-note';
+                line.innerHTML = `
+                    <span>📱 <strong>${escapeHtml(notice.name)}</strong> added a new device (${escapeHtml(notice.label)}).</span>
+                    <button onclick="dismissDeviceNotice(${index})">Dismiss</button>
+                `;
+                container.appendChild(line);
+            });
+
             // Sort users so current user appears first
             const sortedUsers = Object.entries(groupData.users).sort(([usernameA], [usernameB]) => {
                 if (usernameA === currentUser) return -1;
@@ -1659,7 +2249,10 @@
                         <h3>${escapeHtml(username)} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
-                            ${!window.isObserverMode && currentUser === groupData.createdBy && username !== currentUser ?
+                            ${deviceCountFor(username) > 1
+                                ? `<span class="device-marker" title="${escapeHtml(username)} is signed in on ${deviceCountFor(username)} devices">📱 ${deviceCountFor(username)} devices</span>`
+                                : ''}
+                            ${!window.isObserverMode && canActAsCreator() && username !== currentUser ?
                                 `<button onclick="deleteUser('${escapeJsAttr(username)}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>`
                                 : ''}
                         </div>
@@ -1760,7 +2353,7 @@
 
                         // Edit button section
                         // Show edit button if: 1) it's your own item, OR 2) you're the group creator
-                        const canEdit = isOwnWishlist || (currentUser === groupData.createdBy);
+                        const canEdit = isOwnWishlist || canActAsCreator();
 
                         // Only show action buttons if NOT in observer mode
                         if (!window.isObserverMode && (canEdit || !isOwnWishlist)) {
@@ -2087,9 +2680,11 @@
         }
 
         // Delete User (Group Creator Only)
+        //
+        // The server enforces this now; the check here is for UX, so the
+        // button is not offered to people who cannot use it.
         async function deleteUser(username) {
-            // Check if current user is the group creator
-            if (currentUser !== groupData.createdBy) {
+            if (!canActAsCreator()) {
                 alert('Only the group creator can remove users');
                 return;
             }
@@ -2100,7 +2695,13 @@
                 return;
             }
 
-            if (confirm(`Are you sure you want to remove ${username} from the group? This will delete their wishlist and all associated data.`)) {
+            // Same shape as the reset confirmation but a smaller blast radius,
+            // so naming the person and their item count is enough (brief 5.7).
+            const user = groupData.users[username];
+            const itemCount = user && Array.isArray(user.items) ? user.items.length : 0;
+            const itemLabel = itemCount === 1 ? '1 item' : `${itemCount} items`;
+
+            if (confirm(`Remove ${username} from the group?\n\nThis deletes their wishlist (${itemLabel}) and removes them from anything they had claimed. It cannot be undone.`)) {
                 // Remove the user's wishlist
                 delete groupData.users[username];
                 
@@ -2129,7 +2730,7 @@
 
         function showEditItemModal(username, itemIndex) {
             // Check if current user can edit this item (own item OR is group creator)
-            const canEdit = (username === currentUser) || (currentUser === groupData.createdBy);
+            const canEdit = (username === currentUser) || canActAsCreator();
             
             if (!canEdit) {
                 alert('You can only edit your own items');
@@ -2250,27 +2851,84 @@
             }
         }
 
-        // Reset Group
+        // ---------------------------------------------------------------
+        // Reset Group (brief 5.7)
+        //
+        // Two guards, both required. Typing the group name stops the confused
+        // relative who clicked "that's me" without understanding what they had
+        // inherited; the soft delete on the server means even a determined
+        // mistake is recoverable for 30 days.
+        // ---------------------------------------------------------------
+        function showResetConfirm() {
+            const nameEl = document.getElementById('resetConfirmGroupName');
+            if (nameEl) nameEl.textContent = groupData.groupName || '';
+
+            const input = document.getElementById('resetConfirmInput');
+            if (input) input.value = '';
+
+            updateResetConfirmState();
+            showModal('resetConfirmModal');
+        }
+
+        function updateResetConfirmState() {
+            const input = document.getElementById('resetConfirmInput');
+            const button = document.getElementById('resetConfirmButton');
+            if (!input || !button) return;
+
+            const typed = input.value.trim();
+            const expected = (groupData.groupName || '').trim();
+            button.disabled = !expected || typed !== expected;
+        }
+
         async function resetGroup() {
-            if (groupData.createdBy !== currentUser) {
-                alert('Only the group creator can reset the group');
+            const input = document.getElementById('resetConfirmInput');
+            const typed = input ? input.value.trim() : '';
+
+            if (!typed || typed !== (groupData.groupName || '').trim()) {
                 return;
             }
 
-            if (confirm('Are you sure you want to reset the entire group? This will delete all data!')) {
-                try {
-                    const response = await fetch(`/api/groups/${groupId}`, {
-                        method: 'DELETE'
-                    });
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/reset`, { method: 'POST' });
+                const result = await response.json().catch(() => null);
 
-                    if (response.ok) {
-                        window.location.hash = '';
-                        window.location.reload();
-                    }
-                } catch (error) {
-                    alert('Error resetting group');
+                if (response.status === 403) {
+                    hideModal('resetConfirmModal');
+                    showSaveError(result && result.message ? result.message : null);
+                    return;
                 }
+
+                if (!result || !result.success) {
+                    hideModal('resetConfirmModal');
+                    showSaveError(result && result.message ? result.message : null);
+                    return;
+                }
+
+                hideModal('resetConfirmModal');
+                resetState = result.reset;
+                showUndoResetBanner();
+            } catch (error) {
+                console.error('Error resetting group:', error);
+                hideModal('resetConfirmModal');
+                showSaveError('We could not reach the server.');
             }
+        }
+
+        // The person who just reset the group stays on the page, with an undo
+        // that does not time out from under them.
+        function showUndoResetBanner() {
+            const banner = document.getElementById('undoResetBanner');
+            const detail = document.getElementById('undoResetDetail');
+            if (!banner || !resetState) return;
+
+            if (detail) {
+                const until = new Date(resetState.undoAvailableUntil);
+                detail.textContent = isNaN(until)
+                    ? 'You can undo this for the next 30 days.'
+                    : `You can undo this until ${until.toLocaleDateString()}.`;
+            }
+
+            banner.style.display = 'flex';
         }
 
         // Copy Link
@@ -2359,13 +3017,23 @@
         // user by showSaveError() regardless.
         async function saveData() {
             try {
-                const response = await fetch(`/api/groups/${groupId}`, {
+                const response = await apiFetch(`/api/groups/${groupId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(groupData)
                 });
+
+                // The group was reset out from under this tab.
+                if (response.status === 409) {
+                    const body = await response.json().catch(() => null);
+                    if (body && body.reset) {
+                        resetState = body.reset;
+                        showResetScreen();
+                        return false;
+                    }
+                }
 
                 let result = null;
                 try {
