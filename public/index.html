@@ -1189,6 +1189,9 @@
         let memberToken = null;       // token for the current group, if we hold one
         let isGroupCreator = false;   // server's answer, used for UX gating only
         let groupMembers = [];        // from /members, for the device-count markers
+        let groupMeta = null;         // name/holiday/date/member names, all an
+                                      // un-joined visitor is given (brief 6.3)
+        let autoClaimAttempted = false; // migration re-claim is a once-per-load thing
         let groupExistsOnServer = false;
         let pendingJoinName = null;   // name awaiting the "is this you?" answer
         let resetState = null;        // set when the group has been reset
@@ -1244,7 +1247,9 @@
             // recognises should not dump the user back to the join screen if we
             // can quietly fix it. Re-claim the stored name, then retry once.
             // Only if that fails do we actually interrupt them.
-            if (response.status === 401 && allowRetry && currentUser && groupId) {
+            // Never in observer mode: the admin is not a member, and re-claiming
+            // would enrol "[ADMIN OBSERVER]" in somebody's family group.
+            if (response.status === 401 && allowRetry && currentUser && groupId && !window.isObserverMode) {
                 clearMemberToken(groupId);
                 const rejoined = await requestJoin(currentUser, { confirmExisting: true, silent: true });
 
@@ -1312,6 +1317,21 @@
             if (isGroupCreator) return true;
             if (memberToken) return false;
             return Boolean(groupData && groupData.createdBy) && groupData.createdBy === currentUser;
+        }
+
+        // Before joining we have groupMeta; after joining we have the real
+        // (filtered) blob. Both carry the group's name and who is in it, so
+        // read through one helper rather than teaching every caller about both.
+        function currentGroupName() {
+            if (groupData && groupData.groupName) return groupData.groupName;
+            if (groupMeta && groupMeta.groupName) return groupMeta.groupName;
+            return '';
+        }
+
+        function knownMemberNames() {
+            if (groupData && groupData.users) return Object.keys(groupData.users);
+            if (groupMeta && Array.isArray(groupMeta.memberNames)) return groupMeta.memberNames;
+            return [];
         }
 
         function showJoinNotice(message) {
@@ -1480,9 +1500,40 @@
             }
         }
 
-        async function loadGroupAsObserver() {
+        // Brief 6.4: the public endpoint filters per viewer now, so observer
+        // mode reads the admin one instead -- already behind requireAdmin, and
+        // deliberately unfiltered. An admin debugging "who claimed Dad's
+        // sweater" needs to see the claims.
+        //
+        // The bearer token comes from the admin dashboard's own session. The
+        // observer tab is opened from admin.html with window.open() on the same
+        // origin, which hands it a copy of that sessionStorage.
+        function adminSessionToken() {
             try {
-                const response = await fetch(`/api/groups/${groupId}`);
+                return sessionStorage.getItem('adminToken');
+            } catch (error) {
+                return null;
+            }
+        }
+
+        async function loadGroupAsObserver() {
+            const adminToken = adminSessionToken();
+
+            if (!adminToken) {
+                alert('Observer mode needs an admin session. Open this from the admin dashboard.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/api/groups/${groupId}`, {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+
+                if (response.status === 401) {
+                    alert('Your admin session has expired. Sign in to the admin dashboard again.');
+                    return;
+                }
+
                 const result = await response.json();
 
                 if (result.success && result.data) {
@@ -1836,9 +1887,7 @@
 
             // Make sure the join screen is what sits behind the modal, so
             // dismissing it leaves the user somewhere sensible.
-            if (groupData && groupData.groupName) {
-                document.getElementById('groupNameDisplay').textContent = groupData.groupName;
-            }
+            document.getElementById('groupNameDisplay').textContent = currentGroupName();
             showScreen('join');
             showModal('disambiguationModal');
         }
@@ -1874,8 +1923,10 @@
             if (!base) return '';
 
             // "John" -> "John B.", then B, C, D... against names already in the
-            // group so the suggestion is not itself taken.
-            const taken = new Set(Object.keys((groupData && groupData.users) || {}));
+            // group so the suggestion is not itself taken. Before joining, that
+            // list comes from the metadata payload; there are no wishlists to
+            // read it off yet.
+            const taken = new Set(knownMemberNames());
             for (let i = 1; i < 26; i++) {
                 const candidate = `${base} ${String.fromCharCode(65 + i)}.`;
                 if (!taken.has(candidate)) return candidate;
@@ -1902,6 +1953,41 @@
                     return;
                 }
 
+                // Brief 6.3: we hold no token, so the server sent only what the
+                // join screen needs -- the group's name, holiday, date and the
+                // names already in it. No wishlists, no items, no claim data.
+                // There is nothing to render here but the door.
+                if (result.success && result.access === 'metadata') {
+                    groupMeta = result.meta || {};
+                    groupExistsOnServer = true;
+                    resetState = null;
+
+                    if (groupMeta.holiday) {
+                        applyTheme(groupMeta.holiday);
+                    }
+
+                    // A returning user from before member tokens existed: a
+                    // remembered name and nothing to prove it. Claiming the name
+                    // is the ordinary join flow, so for most people this happens
+                    // invisibly (brief 5.9).
+                    //
+                    // Once per page load, though. If the name comes back taken
+                    // the user has a question in front of them, and asking it
+                    // again on every 10-second poll would reopen the prompt
+                    // under their fingers.
+                    if (currentUser && !memberToken && !autoClaimAttempted) {
+                        autoClaimAttempted = true;
+                        await claimName(currentUser, { confirmExisting: false });
+                        return;
+                    }
+
+                    if (!silent) {
+                        document.getElementById('groupNameDisplay').textContent = groupMeta.groupName || '';
+                        showScreen('join');
+                    }
+                    return;
+                }
+
                 if (result.success && result.data) {
                     groupData = result.data;
                     groupExistsOnServer = true;
@@ -1924,15 +2010,9 @@
                         applyTheme(groupData.holiday);
                     }
 
-                    // A returning user from before member tokens existed: they
-                    // have a remembered name but nothing to prove it. Claiming
-                    // the name is the ordinary join flow, so for most people
-                    // this succeeds and they never see anything (brief 5.9).
-                    if (currentUser && !memberToken) {
-                        const claimed = await claimName(currentUser, { confirmExisting: false });
-                        if (!claimed) return;
-                        return;
-                    }
+                    // Reaching here means the server served us wishlists, which
+                    // it only does for a recognised token -- the migration
+                    // re-claim lives in the metadata branch above.
 
                     // If user is already logged in, show app
                     if (currentUser && groupData.users[currentUser]) {
@@ -2098,7 +2178,14 @@
         // Check if event date has passed and show thank you button
         function checkAndShowThankYouButton() {
             const thankYouSection = document.getElementById('thankYouSection');
-            
+
+            // The reveal answers about the CALLER's own list, and an observer
+            // has none. Admins read claim data from the admin endpoint instead.
+            if (window.isObserverMode) {
+                thankYouSection.style.display = 'none';
+                return;
+            }
+
             if (!groupData.eventDate) {
                 thankYouSection.style.display = 'none';
                 return;
@@ -2117,17 +2204,57 @@
         }
 
         // Show thank you modal with gift givers
-        function showThankYouModal() {
+        //
+        // The buyers are no longer in the copy of the group this browser holds:
+        // claim data on your own items is stripped server-side (brief 6.2), and
+        // that is the whole point of the app. So the reveal is fetched, from an
+        // endpoint that only answers about your own list and only once the
+        // event has actually happened.
+        async function showThankYouModal() {
             const content = document.getElementById('thankYouContent');
-            
-            if (!groupData.users[currentUser]) {
-                content.innerHTML = '<p style="text-align: center; color: #666;">No wishlist found.</p>';
-                showModal('thankYouModal');
+
+            content.innerHTML = '<p style="text-align: center; color: #666;">Loading…</p>';
+            showModal('thankYouModal');
+
+            let result = null;
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/thank-you`);
+                result = await response.json().catch(() => null);
+            } catch (error) {
+                console.error('Error loading thank-you list:', error);
+            }
+
+            if (!result || !result.success) {
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <p style="color: #666;">We could not load your gift list just now.</p>
+                        <p style="font-size: 14px; color: #999;">Please check your connection and try again.</p>
+                    </div>
+                `;
                 return;
             }
 
-            const myItems = groupData.users[currentUser].items;
-            const purchasedItems = myItems.filter(item => item.purchased && item.claimedBy && item.claimedBy.length > 0);
+            if (result.reset) {
+                resetState = result.reset;
+                hideModal('thankYouModal');
+                showResetScreen();
+                return;
+            }
+
+            if (!result.available) {
+                const message = result.reason === 'no_event_date'
+                    ? 'This group has no event date set, so there is nothing to unlock yet.'
+                    : 'Your event has not happened yet — no peeking!';
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <p style="color: #666; margin-bottom: 15px;">${escapeHtml(message)}</p>
+                        <p style="font-size: 14px; color: #999;">Who bought what for you stays hidden until the day after your event.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const purchasedItems = Array.isArray(result.gifts) ? result.gifts : [];
 
             if (purchasedItems.length === 0) {
                 content.innerHTML = `
@@ -2143,29 +2270,28 @@
                     </p>
                 `;
 
-                purchasedItems.forEach(item => {
-                    const buyers = item.claimedBy.join(', ');
-                    const isSplit = item.claimedBy.length > 1;
-                    
+                purchasedItems.forEach(gift => {
+                    const buyerList = Array.isArray(gift.buyers) ? gift.buyers : [];
+                    const buyers = buyerList.join(', ');
+                    const isSplit = buyerList.length > 1;
+
                     html += `
                         <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #2ecc71;">
                             <div style="font-weight: 600; color: #333; margin-bottom: 5px;">
-                                ${escapeHtml(item.description)}
+                                ${escapeHtml(gift.description)}
                             </div>
                             <div style="font-size: 14px; color: #2ecc71; margin-top: 5px;">
                                 💝 ${isSplit ? 'Split gift from' : 'Gift from'}: <strong>${escapeHtml(buyers)}</strong>
                             </div>
-                            ${item.price ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">Price range: ${escapeHtml(item.price)}</div>` : ''}
+                            ${gift.price ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">Price range: ${escapeHtml(gift.price)}</div>` : ''}
                         </div>
                     `;
                 });
 
                 // Summary
                 const uniqueBuyers = new Set();
-                purchasedItems.forEach(item => {
-                    if (item.claimedBy) {
-                        item.claimedBy.forEach(buyer => uniqueBuyers.add(buyer));
-                    }
+                purchasedItems.forEach(gift => {
+                    (gift.buyers || []).forEach(buyer => uniqueBuyers.add(buyer));
                 });
 
                 html += `
@@ -2178,8 +2304,6 @@
 
                 content.innerHTML = html;
             }
-
-            showModal('thankYouModal');
         }
 
         // Toggle wishlist expansion

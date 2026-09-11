@@ -457,6 +457,169 @@ function resetStatePayload(row) {
   };
 }
 
+// ============================================================
+// Viewer-scoped filtering (brief section 6)
+// ------------------------------------------------------------
+// The headline promise of this app is that a recipient never finds out who
+// claimed their own gifts. Until now that was enforced only by index.html
+// declining to render the fields: the whole blob, claim data included, went to
+// every member, so opening /api/groups/<id> in a browser tab showed a
+// recipient exactly who had bought what for them. The promise was cosmetic.
+// It is enforced here now, per viewer, using the Phase 2 token.
+// ============================================================
+
+// Everything on an item that would give away who is buying it. Stripped from
+// the requesting member's OWN items, and from nobody else's.
+//
+// infoRequest is deliberately NOT in this list. The owner is meant to see that
+// somebody asked for more detail -- that is the entire point of the feature --
+// and the stored shape ({count, signature, lastRequestedAt}) records no name
+// by design. See sanitizeInfoRequest().
+//
+// splitRequests does not exist in the data model yet; it arrives in Phase 4.
+// It is listed now so that it is impossible to ship that feature and forget
+// this file.
+const PRIVATE_ITEM_FIELDS = ['claimedBy', 'purchased', 'splitWith', 'splitRequests'];
+
+function filterGroupForViewer(blob, viewerName) {
+  // Deep clone before touching anything. pg hands back a fresh object per
+  // query today, so this is belt and braces -- but it costs nothing, and the
+  // failure mode if that ever stops being true (serving one viewer's mutated
+  // blob to the next caller) is the exact bug this section exists to prevent.
+  const view = JSON.parse(JSON.stringify(blob || {}));
+
+  const own = view.users && view.users[viewerName];
+  if (own && Array.isArray(own.items)) {
+    own.items.forEach(item => {
+      PRIVATE_ITEM_FIELDS.forEach(field => { delete item[field]; });
+    });
+  }
+
+  return view;
+}
+
+// What a caller holding no token is allowed to know: enough to render the join
+// screen, and nothing else (brief 6.3). No wishlists, no items, no claims.
+function groupMetadataPayload(blob) {
+  const data = blob || {};
+  return {
+    groupName: typeof data.groupName === 'string' ? data.groupName : '',
+    holiday: typeof data.holiday === 'string' ? data.holiday : 'Christmas',
+    eventDate: typeof data.eventDate === 'string' ? data.eventDate : '',
+    // Names only. The join screen needs them so it can suggest a name that is
+    // not already taken. Item counts come from the join endpoint, which at
+    // least makes the caller name the member they are asking about.
+    memberNames: data.users && typeof data.users === 'object' && !Array.isArray(data.users)
+      ? Object.keys(data.users)
+      : []
+  };
+}
+
+// The other half of filtering.
+//
+// Writes are still whole-blob until Phase 4, and a client now only ever holds a
+// FILTERED copy of the group. So the fields we stripped on the way out would
+// come back missing on the way in and erase themselves -- every member would
+// silently wipe the claims on their own list every time they added an item.
+// Restore them here, by item id, from what is actually stored.
+//
+// This runs for the writer's OWN items only. Everybody else's items arrive
+// intact, because they were never filtered on the way out.
+function restoreOwnItemPrivateFields(incoming, stored, viewerName) {
+  if (!viewerName) return;
+
+  const incomingUser = incoming && incoming.users && incoming.users[viewerName];
+  if (!incomingUser || !Array.isArray(incomingUser.items)) return;
+
+  const storedUser = stored && stored.users && stored.users[viewerName];
+  const storedItems = storedUser && Array.isArray(storedUser.items) ? storedUser.items : [];
+
+  const storedById = new Map();
+  storedItems.forEach(item => {
+    if (item && typeof item.id === 'string') storedById.set(item.id, item);
+  });
+
+  // Items stored before this app had item ids at all. sanitizeGroupData() mints
+  // one for such an item on its way in, so by the time we get here there is no
+  // id to match on, and the claims sitting on it would be lost on this member's
+  // very first save. Fall back to the description -- stable, and consumed in
+  // order so that duplicate descriptions pair up the way they are listed.
+  // Position would be the obvious alternative and is wrong: adding or deleting
+  // an item shifts every index after it.
+  const storedByDescription = new Map();
+  storedItems.forEach(item => {
+    if (!item || typeof item.id === 'string') return;
+    const key = item.description || '';
+    if (!storedByDescription.has(key)) storedByDescription.set(key, []);
+    storedByDescription.get(key).push(item);
+  });
+
+  incomingUser.items.forEach(item => {
+    let previous = storedById.get(item.id);
+
+    if (!previous) {
+      const sameDescription = storedByDescription.get(item.description || '');
+      if (sameDescription && sameDescription.length > 0) previous = sameDescription.shift();
+    }
+    // No stored counterpart means the member has just added this item, and an
+    // item nobody else has seen yet cannot have been claimed. Whatever the
+    // client sent for these fields is ignored either way: an owner has no
+    // business setting claim state on their own list.
+    if (!previous) {
+      item.claimedBy = [];
+      item.purchased = false;
+      item.splitWith = [];
+      return;
+    }
+
+    item.claimedBy = Array.isArray(previous.claimedBy)
+      ? previous.claimedBy.slice(0, 10).map(name => sanitizeString(name, 100))
+      : [];
+    item.purchased = Boolean(previous.purchased);
+    item.splitWith = Array.isArray(previous.splitWith)
+      ? previous.splitWith.slice(0, 10).map(name => sanitizeString(name, 100))
+      : [];
+  });
+}
+
+// Removing a member has to take their claims with them. The frontend does this
+// too, but it cannot touch claims on the ACTING member's own items -- those are
+// filtered out of the copy it holds, and restored above from storage -- so the
+// authoritative pass has to happen here.
+function scrubNamesFromClaims(blob, names) {
+  if (!names || names.length === 0) return;
+  const removed = new Set(names);
+
+  Object.values((blob && blob.users) || {}).forEach(user => {
+    if (!user || !Array.isArray(user.items)) return;
+    user.items.forEach(item => {
+      if (Array.isArray(item.claimedBy)) {
+        item.claimedBy = item.claimedBy.filter(name => !removed.has(name));
+      }
+      if (Array.isArray(item.splitWith)) {
+        item.splitWith = item.splitWith.filter(name => !removed.has(name));
+      }
+    });
+  });
+}
+
+// Has the group's event happened yet?
+//
+// This is the one condition under which a member is allowed to learn who
+// bought their gifts (the thank-you list). index.html has always shown that
+// button from the day after the event; the difference now is that the rule is
+// enforced where it cannot be edited out with devtools. Event dates are plain
+// YYYY-MM-DD, which parses as UTC midnight, so the reveal opens 24 hours after
+// that -- deliberately the conservative side of the frontend's local-midnight
+// comparison. A recipient waiting a few extra hours is a non-event; the
+// opposite mistake is the bug this whole phase is about.
+function eventHasPassed(eventDate) {
+  if (typeof eventDate !== 'string' || !eventDate) return false;
+  const event = new Date(eventDate);
+  if (isNaN(event.getTime())) return false;
+  return Date.now() > event.getTime() + 24 * 60 * 60 * 1000;
+}
+
 // Helper function to validate and sanitize group data
 function validateGroupData(data) {
   const errors = [];
@@ -655,27 +818,44 @@ app.get('/api/groups/:groupId', readLimiter, async (req, res) => {
     }
 
     const token = readMemberToken(req);
-    let viewer = null;
 
-    if (token) {
-      const member = await resolveMember(pool, groupId, token);
-      if (!member) {
-        // Let the client heal itself (re-join with its stored name) rather
-        // than silently serving it as an anonymous viewer forever.
-        return res.status(401).json({
-          success: false,
-          code: 'invalid_token',
-          message: 'This device is no longer recognised for this group.'
-        });
-      }
-      await touchMember(pool, member);
-      viewer = { memberName: member.member_name, isCreator: member.is_creator };
+    // Brief 6.3: no token, no wishlists. A caller who holds the link but has
+    // not joined gets the group's name, holiday, date and member names -- all
+    // the join screen needs -- and nothing else. This closes the "paste the
+    // API URL into a tab" leak completely for non-members.
+    if (!token) {
+      return res.json({
+        success: true,
+        access: 'metadata',
+        data: null,
+        meta: groupMetadataPayload(row.data)
+      });
     }
 
-    // NOTE: the response body is the stored blob, which never contains token
-    // material -- tokens live only in group_members, and `viewer` below carries
-    // a name and a boolean, nothing else.
-    res.json({ success: true, data: row.data, viewer });
+    const member = await resolveMember(pool, groupId, token);
+    if (!member) {
+      // Let the client heal itself (re-join with its stored name) rather than
+      // silently demoting it to an anonymous viewer forever.
+      return res.status(401).json({
+        success: false,
+        code: 'invalid_token',
+        message: 'This device is no longer recognised for this group.'
+      });
+    }
+    await touchMember(pool, member);
+
+    // Brief 6.2: this is the fix for the headline bug. The blob goes out with
+    // every claim, purchase and split stripped from THIS member's own items,
+    // and everyone else's left intact.
+    //
+    // NOTE: no token material is ever in here -- hashes live only in
+    // group_members, and `viewer` carries a name and a boolean.
+    res.json({
+      success: true,
+      access: 'member',
+      data: filterGroupForViewer(row.data, member.member_name),
+      viewer: { memberName: member.member_name, isCreator: member.is_creator }
+    });
   } catch (error) {
     console.error('Error loading group:', error);
     res.status(500).json({
@@ -855,6 +1035,13 @@ app.get('/api/groups/:groupId/members', readLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid group ID format' });
     }
 
+    // Device labels and timestamps are for the group to police itself with
+    // (brief 5.6), so they go to members only. A caller with no token gets the
+    // same names the join screen already shows it and nothing more, in keeping
+    // with 6.3.
+    const token = readMemberToken(req);
+    const viewer = token ? await resolveMember(pool, groupId, token) : null;
+
     const result = await pool.query(
       `SELECT member_name, is_creator, device_label, created_at, last_seen_at
          FROM group_members
@@ -876,17 +1063,95 @@ app.get('/api/groups/:groupId/members', readLimiter, async (req, res) => {
       const entry = byName.get(row.member_name);
       entry.isCreator = entry.isCreator || row.is_creator;
       entry.deviceCount += 1;
-      entry.devices.push({
-        label: row.device_label || 'Unknown device',
-        joinedAt: row.created_at,
-        lastSeenAt: row.last_seen_at
-      });
+      if (viewer) {
+        entry.devices.push({
+          label: row.device_label || 'Unknown device',
+          joinedAt: row.created_at,
+          lastSeenAt: row.last_seen_at
+        });
+      }
     }
 
     res.json({ success: true, members: Array.from(byName.values()) });
   } catch (error) {
     console.error('Error loading members:', error);
     res.status(500).json({ success: false, message: 'Error loading members' });
+  }
+});
+
+// ---------------------------------------------------------------
+// The thank-you list (brief 6.2, existing feature)
+//
+// This is the single place a member is meant to learn who bought their gifts,
+// and only once the event has actually happened. It used to work by reading
+// claim data straight out of the blob every member already had, with the
+// button hidden until the event date -- which made the reveal exactly as
+// cosmetic as the surprise it was breaking. Claim data on your own items no
+// longer leaves the server, so the reveal needs its own endpoint, and the date
+// check that used to be a piece of UI is now the actual rule.
+//
+// Only ever answers about the CALLER's own list. There is no parameter for
+// whose list to read, deliberately.
+// ---------------------------------------------------------------
+app.get('/api/groups/:groupId/thank-you', readLimiter, async (req, res) => {
+  try {
+    const groupId = req.params.groupId;
+
+    if (!isValidGroupId(groupId)) {
+      return res.status(400).json({ success: false, message: 'Invalid group ID format' });
+    }
+
+    const token = readMemberToken(req);
+    const member = token ? await resolveMember(pool, groupId, token) : null;
+
+    if (!member) {
+      return res.status(401).json({
+        success: false,
+        code: token ? 'invalid_token' : 'auth_required',
+        message: 'This device is not signed in to the group.'
+      });
+    }
+
+    const result = await pool.query(
+      'SELECT data, deleted_at FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Group not found' });
+    }
+
+    const row = result.rows[0];
+    if (row.deleted_at) {
+      return res.json({ success: true, reset: resetStatePayload(row) });
+    }
+
+    const blob = row.data || {};
+
+    if (!eventHasPassed(blob.eventDate)) {
+      // No gift data in this response. Not "an empty list" -- nothing at all.
+      return res.json({
+        success: true,
+        available: false,
+        reason: blob.eventDate ? 'event_upcoming' : 'no_event_date'
+      });
+    }
+
+    const own = blob.users && blob.users[member.member_name];
+    const items = own && Array.isArray(own.items) ? own.items : [];
+
+    const gifts = items
+      .filter(item => item && item.purchased && Array.isArray(item.claimedBy) && item.claimedBy.length > 0)
+      .map(item => ({
+        description: item.description || '',
+        price: item.price || '',
+        buyers: item.claimedBy.slice(0, 10)
+      }));
+
+    res.json({ success: true, available: true, gifts });
+  } catch (error) {
+    console.error('Error loading thank-you list:', error);
+    res.status(500).json({ success: false, message: 'Error loading your thank-you list' });
   }
 });
 
@@ -938,6 +1203,40 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
       }
 
       // ---------------------------------------------------------------
+      // Identity is now required to write to a group that already exists
+      // (brief 6.2/6.3).
+      //
+      // Every client only ever holds a FILTERED copy of the group, so a caller
+      // we cannot identify is by definition posting an incomplete blob: either
+      // a tab left open from before member tokens, or somebody who never
+      // joined. Neither may overwrite a live group. Creating a brand new group
+      // still needs no token -- there is nothing to overwrite, and the joining
+      // client claims its name immediately afterwards.
+      //
+      // 401 rather than 403 on purpose: it is what apiFetch() in index.html
+      // heals from, by re-claiming the stored name and retrying once.
+      // ---------------------------------------------------------------
+      const token = readMemberToken(req);
+      const member = token ? await resolveMember(pool, groupId, token) : null;
+
+      if (!member) {
+        return res.status(401).json({
+          success: false,
+          code: 'auth_required',
+          message: 'This device needs to sign back in to the group before saving.'
+        });
+      }
+      await touchMember(pool, member);
+
+      const storedBlob = stored.data || {};
+
+      // Put back the claim data we stripped from this member's own items on
+      // the way out, before anything else reads the incoming blob. Without
+      // this, every save a member makes would wipe the claims on their own
+      // list -- the write path undoing the read path.
+      restoreOwnItemPrivateFields(sanitizedData, storedBlob, member.member_name);
+
+      // ---------------------------------------------------------------
       // Creator gate on the blob write (brief 5.5), deliberately narrow.
       //
       // Only the DESTRUCTIVE shapes are gated here: removing a member, and
@@ -950,7 +1249,6 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
       // regress anything: the creator's name was already claimable by anyone
       // who typed it, and Phase 2 does not widen that.
       // ---------------------------------------------------------------
-      const storedBlob = stored.data || {};
       const storedUsers = Object.keys(storedBlob.users || {});
       const incomingUsers = new Set(Object.keys(sanitizedData.users || {}));
       const removedUsers = storedUsers.filter(name => !incomingUsers.has(name));
@@ -960,8 +1258,6 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
       const creatorChanged = Boolean(storedCreator) && storedCreator !== sanitizedData.createdBy;
 
       if (removedUsers.length > 0 || creatorChanged) {
-        const token = readMemberToken(req);
-        const member = await resolveMember(pool, groupId, token);
         const allowed = await hasCreatorAuthority(
           pool, groupId, storedBlob, member, readActingName(req)
         );
@@ -983,6 +1279,11 @@ app.post('/api/groups/:groupId', writeLimiter, async (req, res) => {
             'DELETE FROM group_members WHERE group_id = $1 AND member_name = ANY($2::varchar[])',
             [groupId, removedUsers]
           );
+
+          // ...and takes their claims with them. The acting member's own items
+          // were restored from storage just above, so the client's own pass
+          // over them could not have caught these.
+          scrubNamesFromClaims(sanitizedData, removedUsers);
         }
       }
     }

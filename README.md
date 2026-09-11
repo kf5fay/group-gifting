@@ -27,7 +27,8 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 - ❓ **Ask for More Info (Anonymous)** - Vague item on someone's list? Ask them to add details without revealing you asked. The owner sees a reminder banner and a badge on that item; nobody — including the owner — can see who asked. The reminder stays until they actually update the item, and the "×" only hides the banner for 24 hours (a new request from someone else brings it back).
 
 ### The Magic: Gift Surprise Preservation 🎁
-- 🎁 **Recipients Can't See Claims** - When viewing YOUR OWN wishlist, you can't see:
+- 🎁 **Recipients Can't See Claims** - Claim data on your own items is removed by the
+  server before the page ever receives it, so on YOUR OWN wishlist there is nothing to see:
   - Who claimed your items
   - That your items were claimed at all
   - Purchase status
@@ -37,6 +38,11 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
   - Purchase status
   - Split gift participants
   - Full coordination info
+- 🔎 **Enforced server-side** - The filtering happens per viewer, in the API response.
+  Opening the API URL directly, or reading the page source, shows a recipient no more
+  than the app does.
+- 💌 **Except afterwards** - Once the event date has passed, "Who Do I Thank?" tells you
+  who bought what for you. That reveal is date-gated on the server too.
 - **Result**: Perfect gift coordination without spoiling the surprise!
 
 ### Group Management (Creator Only)
@@ -78,6 +84,10 @@ The observer mode is a powerful feature that lets you debug user issues without 
 3. A red banner will appear at the top indicating "ADMIN OBSERVER MODE - Read Only"
 4. You can see all wishlists, claims, and purchases without your name appearing in the user list
 5. All input fields and action buttons are disabled - no data can be modified
+
+Observer mode reads `/admin/api/groups/:groupId`, which is unfiltered, rather than the public
+endpoint, which is not. It therefore needs a live admin session: open it from the dashboard's
+"👁️ View" button rather than by typing the `?admin=true` URL yourself.
 
 ### Security
 - Sessions expire after 2 hours of inactivity
@@ -256,11 +266,21 @@ https://comegiftit.com/#abc123xyz
 ### API Endpoints
 
 **Public Endpoints:**
-- `GET /api/groups/:groupId` - Retrieve group data
-- `POST /api/groups/:groupId` - Create or update group data
-- `DELETE /api/groups/:groupId` - Delete group data (reset)
+- `GET /api/groups/:groupId` - Retrieve group data. With a member token, returns the group
+  with claim data stripped from the caller's own items. Without one, returns group name,
+  holiday, event date and member names only — no wishlists.
+- `POST /api/groups/:groupId` - Create a group, or update one (member token required)
+- `POST /api/groups/:groupId/join` - Claim a name in a group and receive a device token
+- `GET /api/groups/:groupId/members` - Member list; device details for members only
+- `GET /api/groups/:groupId/thank-you` - Who bought your gifts, once the event has passed
+- `POST /api/groups/:groupId/reset` - Reset a group (creator only, soft delete with 30-day undo)
+- `POST /api/groups/:groupId/undo-reset` - Restore a reset group (creator only)
+- `DELETE /api/groups/:groupId` - Same as reset, kept for older clients
 - `POST /api/contact` - Submit contact form
 - `GET /api/health` - Health check endpoint
+
+Member tokens travel in an `X-Member-Token` header — never in a query string, where they
+would end up in server logs and `Referer` headers.
 
 **Admin Endpoints (require authentication):**
 - `POST /admin/api/login` - Admin login
