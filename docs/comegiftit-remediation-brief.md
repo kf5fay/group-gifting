@@ -375,6 +375,18 @@ The failure mode is two people buying the same gift — precisely what the produ
 
 The server applies each change to the stored JSON inside a transaction rather than accepting a wholesale replacement.
 
+**Build and verify in tiers.** The value is not evenly spread, and this is the largest phase — do not attempt it in one pass.
+
+| Tier | Endpoints | Why |
+|---|---|---|
+| 1 — required | claim, unclaim, purchase, split-request, split-respond | Highest contention. The failure here is two people buying the same gift, which is the promise the product is sold on. |
+| 2 — required | add / edit / delete item, info-request | Low contention on the item itself, but these are the writes that clobber *other people's* concurrent changes. |
+| 3 — optional | settings, remove-user | Creator-only and rare. These can stay blob-shaped with optimistic locking (7.3) without anyone noticing. |
+
+Complete and verify Tier 1 before starting Tier 2.
+
+**Before starting, verify the item ID assumption.** This plan assumes every item already carries a stable `id` assigned in `sanitizeGroupData()`. Confirm that in the code *and* in live data. If existing items lack IDs, a backfill migration is needed first — flag it rather than proceeding.
+
 ```
 POST   /api/groups/:groupId/items                       add an item to own list
 PATCH  /api/groups/:groupId/items/:itemId               edit (own item, or creator)
@@ -433,9 +445,25 @@ Behaviour:
 - Expire pending requests after 30 days, or when the item is unclaimed or purchased.
 - Remove the existing unilateral "Split Gift" button and its handler.
 
-### 7.5 Polling
+### 7.5 Polling and load
 
-Leave the 10-second interval as is. WebSockets are out of scope. With server-enforced claims the polling interval is no longer correctness-critical, only a freshness question.
+Leave the 10-second interval as is. WebSockets are out of scope. With server-enforced claims the interval is no longer correctness-critical, only a freshness question.
+
+Two changes here are specifically about handling volume. Neither alters behaviour.
+
+**Return 304 on unchanged polls.** Every open tab currently fetches the entire group every 10 seconds, and after Phase 3 each of those also costs a deep clone and a filter pass on the server.
+
+- Derive an ETag from `groups.version` (plus the viewer's member name, since responses are now per-viewer).
+- Send it as an `ETag` response header; the client echoes it as `If-None-Match`.
+- On a match, return `304` with an empty body and skip the clone and filter entirely.
+- Most polls will match, so this removes the large majority of both bandwidth and server CPU.
+
+**Stop polling hidden tabs.** People leave this open in a background tab for weeks.
+
+- Pause the interval when `document.visibilityState` is `hidden`.
+- Resume on `visible`, with an immediate fetch rather than waiting out the interval.
+
+**Also check the `pg` pool configuration.** The default pool is small, and 7.2 introduces `SELECT ... FOR UPDATE` transactions that hold connections longer than the current read-only queries. Size it deliberately rather than leaving it at the default.
 
 ---
 
@@ -469,11 +497,16 @@ Phase 3:
 - [ ] Admin observer mode still shows everything
 
 Phase 4:
+- [ ] Every item in live data has a stable `id` (verify before starting)
 - [ ] Two browsers claim the same item simultaneously; one succeeds, the other gets a clear 409 message
 - [ ] Two people add items to different lists at the same time; both persist
+- [ ] Deleting an item from a list does not cause a claim on a later item to hit the wrong gift
 - [ ] Bob requests a split, Mary accepts, both appear in `claimedBy`, John (the owner) sees nothing
 - [ ] Mary declines and Bob is told
 - [ ] No unilateral split path remains
+- [ ] An unchanged poll returns 304 with an empty body
+- [ ] A changed group returns 200 and the client updates
+- [ ] Backgrounding the tab stops network requests; focusing it fetches immediately
 
 ---
 
@@ -499,4 +532,4 @@ Do not do these, even if they seem like obvious improvements:
 1. **Phase 1** — ship independently, low risk, immediate value. The OG tags matter most for launch.
 2. **Phase 2** — the foundation. Nothing else works without it. Test the migration path against a copy of production data before deploying.
 3. **Phase 3** — small once Phase 2 exists, and it is the fix for the headline bug.
-4. **Phase 4** — largest change, touches the most frontend code. Do it last, and consider splitting claim/unclaim (highest value) from the rest.
+4. **Phase 4** — largest change, touches the most frontend code. Do it last, and work it in the tiers defined in 7.2 rather than as a single pass. The item-ID conversion is the bulk of the frontend churn.
