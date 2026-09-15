@@ -28,6 +28,39 @@
          placeholders. Replace them with real artwork before launch. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+    <!-- Landing page bootstrap. Runs in the head, before any body content is
+         parsed, so both decisions below are settled before first paint.
+
+         1. Routing guard. This file is the landing page AND the whole app.
+            Someone opening /#<groupId> must never see marketing copy flash
+            before the DOMContentLoaded router runs. The class is set here and
+            the landing is hidden by CSS, so it simply never paints.
+
+         2. The seasonal headline lives here, as the single source of that
+            text, so the inline script beside the <h1> can fill it in during
+            parsing rather than swapping it visibly after load. -->
+    <script>
+        (function () {
+            if (window.location.hash.length > 1) {
+                document.documentElement.className += ' hash-route';
+            }
+        })();
+
+        // 1 November - 26 December inclusive, in the visitor's local time.
+        // Takes an optional Date so the switch can be tested with a faked
+        // clock instead of waiting for the calendar.
+        function heroHeadline(now) {
+            var d = now || new Date();
+            var month = d.getMonth();
+            var day = d.getDate();
+            var festive = (month === 10) || (month === 11 && day <= 26);
+
+            return festive
+                ? 'Christmas without three people buying the same gift.'
+                : 'Group gifting without three people buying the same gift.';
+        }
+    </script>
     <style>
         * {
             margin: 0;
@@ -44,7 +77,8 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%);
-            min-height: 100vh;
+            min-height: 100vh;  /* fallback */
+            min-height: 100dvh; /* mobile chrome makes 100vh overshoot */
             padding: 0;
             color: #333;
             position: relative;
@@ -157,7 +191,9 @@
             padding: 12px;
             border: 2px solid #e0e0e0;
             border-radius: 10px;
-            font-size: 14px;
+            /* 16px is the floor: below it iOS Safari zooms the viewport on
+               focus and frequently never zooms back out. Do not lower this. */
+            font-size: 16px;
             transition: border-color 0.3s;
         }
 
@@ -543,10 +579,30 @@
             transform: scale(1.1);
         }
 
+        /* 44x44 tap target without resizing the visible circle (brief 8.3).
+           flex-shrink is pinned because the header is a flex row and was
+           squeezing the button to 25px next to a long heading. */
+        .close-btn {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .close-btn::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44px;
+            height: 44px;
+            transform: translate(-50%, -50%);
+        }
+
         /* Footer */
         .footer {
             background: rgba(255,255,255,0.95);
             padding: 30px 20px;
+            /* Keep the last line clear of the home indicator (brief 8.3). */
+            padding-bottom: calc(30px + env(safe-area-inset-bottom, 0px));
             text-align: center;
             margin-top: 20px;
             color: #666;
@@ -555,7 +611,9 @@
         .footer-links {
             display: flex;
             justify-content: center;
-            gap: 20px;
+            /* Was 20px. The links now carry their own padding to reach a
+               44px tap target, which supplies the separation instead. */
+            gap: 6px;
             margin-bottom: 15px;
             flex-wrap: wrap;
         }
@@ -565,6 +623,13 @@
             text-decoration: none;
             font-size: 14px;
             cursor: pointer;
+            /* 44x44 minimum tap target (brief 8.3). */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 44px;
+            min-height: 44px;
+            padding: 0 6px;
         }
 
         .footer-links a:hover {
@@ -591,6 +656,128 @@
             border: 1px solid #f5576c;
         }
 
+        /* Notice line on the join screen -- used when a device has to sign
+           back in, or when a suggested alternative name is pre-filled. */
+        .join-notice {
+            margin: 0 0 16px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #fff4e5;
+            border: 1px solid #f0b27a;
+            color: #8a5218;
+            font-size: 14px;
+            line-height: 1.45;
+            text-align: left;
+        }
+
+        /* "Is this you?" choices. Equal weight, stacked, so neither option is
+           the obvious one to click (brief 5.4). */
+        .disambiguation-choices {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .disambiguation-choices button {
+            margin: 0;
+            width: 100%;
+            font-size: 15px;
+            padding: 14px 16px;
+            line-height: 1.35;
+            white-space: normal;
+        }
+
+        /* Persistent undo affordance after a reset. */
+        .undo-reset-banner {
+            margin-top: 20px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #fff4e5;
+            border: 1px solid #f0b27a;
+            color: #8a5218;
+            font-size: 14px;
+            line-height: 1.45;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .undo-reset-banner button {
+            width: auto;
+            margin: 0;
+            padding: 8px 18px;
+            font-size: 14px;
+        }
+
+        /* Device markers in the member list (brief 5.6). Identity here is
+           claimed on trust, so it is made visible instead of enforced. */
+        .device-marker {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .split-request-note {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #eef4ff;
+            border-left: 3px solid #4a7ddb;
+            border-radius: 5px;
+            font-size: 13px;
+            color: #2c4a80;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .split-request-note.declined {
+            background: #fdf0f0;
+            border-left-color: #c0616b;
+            color: #7d3a41;
+        }
+
+        .split-request-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .split-request-note button {
+            font-size: 12px;
+            padding: 5px 10px;
+            width: auto;
+            margin: 0;
+        }
+
+        .new-device-note {
+            margin: 0 0 15px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #eef5ff;
+            border: 1px solid #b9d3f5;
+            color: #24486e;
+            font-size: 13px;
+            line-height: 1.45;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .new-device-note button {
+            width: auto;
+            margin: 0;
+            padding: 4px 10px;
+            font-size: 12px;
+            background: transparent !important;
+            color: #24486e !important;
+            box-shadow: none;
+            border: 1px solid #b9d3f5;
+        }
+
         /* Non-blocking toast for writes the server rejected. Fixed to the
            viewport so it is visible from any screen without moving content. */
         .save-error-toast {
@@ -598,6 +785,8 @@
             position: fixed;
             left: 50%;
             bottom: 20px;
+            /* Clear the home indicator on notched devices (brief 8.3). */
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
             transform: translateX(-50%);
             z-index: 2000;
             max-width: 90vw;
@@ -641,6 +830,347 @@
             box-shadow: none;
         }
 
+        /* ============================================================
+           Landing page (the marketing surface at /).
+           Layout and copy only -- no app logic hangs off any of this.
+           Written mobile-first: the base rules are the 375px view and the
+           900px breakpoint is the only widening step.
+           ============================================================ */
+
+        /* Set by the head script when the URL carries a group hash. Hiding
+           the landing in CSS rather than JS is what keeps it from painting
+           before the router runs. */
+        html.hash-route #welcomeScreen {
+            display: none !important;
+        }
+
+        /* The logo lockup, demoted from <h1> so the hero headline can take it.
+           Keeps #headerEmoji / #headerEmoji2 for applyTheme(). */
+        .landing-brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 26px;
+        }
+
+        .hero {
+            display: grid;
+            gap: 30px;
+        }
+
+        .hero-headline {
+            font-size: 26px;
+            line-height: 1.25;
+            text-align: left;
+            color: var(--primary-color);
+            margin-bottom: 14px;
+        }
+
+        .hero-sub {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #555;
+            margin-bottom: 26px;
+        }
+
+        .hero-reassure {
+            margin: 14px 0 0;
+            text-align: center;
+            font-size: 14px;
+            color: #6a6a6a;
+        }
+
+        /* Explicit width/height on the image plus this ratio box means the
+           space is reserved at parse time -- no layout shift when it paints. */
+        .hero-shot {
+            margin: 0;
+            justify-self: center;
+            width: 100%;
+            max-width: 320px;
+        }
+
+        .hero-shot img {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            border-radius: 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+        }
+
+        /* --- Shared block furniture --- */
+        .landing-block {
+            margin-top: 40px;
+            padding-top: 34px;
+            border-top: 2px solid #eceef1;
+        }
+
+        .landing-block h2 {
+            font-size: 21px;
+            line-height: 1.3;
+            color: var(--primary-color);
+            margin-bottom: 16px;
+        }
+
+        .landing-block p {
+            font-size: 15px;
+            line-height: 1.65;
+            color: #555;
+        }
+
+        .landing-block p + p {
+            margin-top: 14px;
+        }
+
+        /* For headings that exist for hierarchy but have no visible copy in
+           the brief. Standard clip pattern -- still read out, never seen. */
+        .visually-hidden {
+            position: absolute !important;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* --- Block 2: three steps --- */
+        .steps {
+            display: grid;
+            gap: 22px;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .steps h3 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .steps p {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #555;
+        }
+
+        /* --- Block 3: the surprise. Carries more weight than blocks 2 and 5
+           by sitting in a tinted panel rather than on the flat card. --- */
+        .surprise {
+            margin-top: 40px;
+            padding: 30px 24px;
+            border-radius: 16px;
+            /* Tinted from the live theme colour, so the panel follows the
+               Event Type dropdown instead of staying Christmas pink.
+               Flat fallbacks first for anything without color-mix(). */
+            background: #faf7f8;
+            background: color-mix(in srgb, var(--primary-color) 6%, #ffffff);
+            border: 2px solid #ebe5e7;
+            border-color: color-mix(in srgb, var(--primary-color) 18%, #ffffff);
+        }
+
+        .surprise h2 {
+            font-size: 24px;
+            line-height: 1.3;
+            color: var(--primary-color);
+            margin-bottom: 18px;
+        }
+
+        .surprise p {
+            font-size: 16px;
+            line-height: 1.7;
+            color: #4a4a4a;
+        }
+
+        .surprise p + p {
+            margin-top: 16px;
+        }
+
+        /* --- Block 4: video facade. No iframe exists until the button is
+           clicked; until then this is one lazily-loaded poster image. --- */
+        .video-facade {
+            position: relative;
+            /* Capped so a 16:9 box does not swallow the page on a wide card. */
+            max-width: 720px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #eceef1;
+            aspect-ratio: 16 / 9;
+        }
+
+        .video-facade img,
+        .video-facade iframe {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            object-fit: cover;
+        }
+
+        .video-play {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 74px !important;
+            height: 74px;
+            padding: 0;
+            margin: 0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            line-height: 1;
+            transition: transform 0.2s, box-shadow 0.3s;
+        }
+
+        .video-play:hover:not(:disabled) {
+            transform: translate(-50%, -50%) scale(1.08);
+        }
+
+        .video-play:active:not(:disabled) {
+            transform: translate(-50%, -50%);
+        }
+
+        .video-play:focus-visible {
+            outline: 3px solid #fff;
+            outline-offset: 3px;
+        }
+
+        .video-caption {
+            margin-top: 12px;
+            text-align: center;
+            font-size: 14px;
+            color: #6a6a6a;
+        }
+
+        .video-pending {
+            margin-top: 6px;
+            text-align: center;
+            font-size: 13px;
+            color: #6a6a6a; /* 5.41:1 on white -- #8a8a8a missed AA at 3.45:1 */
+            font-style: italic;
+        }
+
+        /* --- The line replacing the old "Join an Existing Group" panel --- */
+        .landing-note {
+            margin-top: 40px;
+            padding-top: 26px;
+            border-top: 2px solid #eceef1;
+            text-align: center;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #6a6a6a;
+        }
+
+        @media (min-width: 900px) {
+            /* Form left, screenshot right. .hero-copy holds the headline,
+               sub-line, form and reassurance line, so the form stays ahead
+               of the screenshot in both DOM and tab order at every width. */
+            .hero {
+                grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+                gap: 46px;
+                align-items: center;
+            }
+
+            .hero-headline {
+                font-size: 34px;
+            }
+
+            .hero-sub {
+                font-size: 17px;
+            }
+
+            .hero-shot {
+                max-width: 340px;
+            }
+
+            .steps {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 30px;
+            }
+
+            .surprise {
+                padding: 36px 34px;
+            }
+        }
+
+        /* Inline text link. The vertical padding is a 44px tap target
+           (brief 8.3); on an inline element it grows the hit area without
+           changing the line box, so the surrounding prose does not reflow. */
+        .inline-link {
+            color: var(--primary-color);
+            cursor: pointer;
+            text-decoration: underline;
+            padding: 14px 4px;
+        }
+
+        /* --- Mobile is the baseline case (brief section 8). Desktop is the
+               adaptation above; this block tunes the phone view. --- */
+        @media (max-width: 899px) {
+            /* 8.1 Spacing is tuned so that at 375x667 the headline, sub-line,
+               the whole form AND the Create button clear the fold, leaving
+               the reassurance line straddling it -- which is what signals
+               there is more page below without a scroll arrow. */
+            .landing-brand {
+                margin-bottom: 18px;
+            }
+
+            .hero-headline {
+                margin-bottom: 10px;
+            }
+
+            .hero-sub {
+                margin-bottom: 18px;
+            }
+
+            /* Scoped to the hero so the wishlist and modal forms elsewhere
+               in the app keep their own rhythm. */
+            .hero-copy .input-group {
+                /* 11px, not 14: the three saved pixels per field are what
+                   push the reassurance line back up across the 667 fold so
+                   a strip of it stays visible. */
+                margin-bottom: 11px;
+            }
+
+            /* 8.3 The screenshot is portrait, so left uncapped it eats most
+               of a phone screen on its own. Width and height stay auto so
+               the intrinsic 720x1280 ratio still drives the reserved box. */
+            .hero-shot img {
+                width: auto;
+                height: auto;
+                max-width: 100%;
+                max-height: 50vh;  /* fallback */
+                max-height: 50dvh;
+                margin: 0 auto;
+            }
+
+            /* 8.3 Reclaim horizontal room for the prose in block 3 -- at
+               375px the tinted panel's padding was squeezing it to roughly
+               28 characters a line. */
+            .surprise {
+                padding: 26px 18px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .video-play,
+            .video-play:hover:not(:disabled) {
+                transition: none;
+                transform: translate(-50%, -50%);
+            }
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .wishlists-grid {
@@ -673,43 +1203,147 @@
     <div class="container">
         <!-- Welcome Screen -->
         <div id="welcomeScreen" class="card">
-            <h1><span id="headerEmoji">🎄</span> ComeGiftIt <span id="headerEmoji2">🎁</span></h1>
-            <p class="tagline">Holiday gifting without the chaos</p>
-            
-            <div class="input-group">
-                <label for="groupNameInput">Create a New Group</label>
-                <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100">
+            <div class="landing-brand">
+                <span id="headerEmoji">🎄</span> ComeGiftIt <span id="headerEmoji2">🎁</span>
             </div>
 
-            <div class="input-group">
-                <label for="holidaySelect">Event Type</label>
-                <select id="holidaySelect">
-                    <option value="Christmas">Christmas</option>
-                    <option value="Birthday">Birthday</option>
-                    <option value="Hanukkah">Hanukkah</option>
-                    <option value="Anniversary">Anniversary</option>
-                    <option value="Other">Other</option>
-                </select>
-            </div>
+            <!-- Block 1: hero. DOM order is headline, sub-line, form,
+                 reassurance, screenshot. .hero-copy wraps the first four so
+                 the 900px two-column layout never reorders them -- the form
+                 stays first in tab order at every viewport. -->
+            <section class="hero">
+                <div class="hero-copy">
+                    <h1 class="hero-headline" id="heroHeadline"></h1>
+                    <script>
+                        // Filled during parsing, before this element paints,
+                        // so the headline never visibly changes after load.
+                        document.getElementById('heroHeadline').textContent = heroHeadline();
+                    </script>
 
-            <div class="input-group">
-                <label for="eventDate">Event Date (Optional)</label>
-                <input type="date" id="eventDate">
-            </div>
+                    <p class="hero-sub">
+                        Create a group, share one link. Everyone adds a wishlist and claims what they're buying — and the person it's for never sees a thing.
+                    </p>
 
+                    <div class="input-group">
+                        <label for="groupNameInput">Create a New Group</label>
+                        <!-- autocomplete off: a group name is not a stored
+                             credential or address, so browser autofill only
+                             offers noise. autocapitalize/enterkeyhint make
+                             the phone keyboard behave (brief 8.2). -->
+                        <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100"
+                               inputmode="text" autocomplete="off" autocapitalize="words"
+                               spellcheck="false" enterkeyhint="done">
+                    </div>
 
-            <button onclick="createGroup()">Create Group</button>
+                    <div class="input-group">
+                        <label for="holidaySelect">Event Type</label>
+                        <select id="holidaySelect">
+                            <option value="Christmas">Christmas</option>
+                            <option value="Birthday">Birthday</option>
+                            <option value="Hanukkah">Hanukkah</option>
+                            <option value="Anniversary">Anniversary</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
 
-            <div style="text-align: center; margin: 30px 0; color: #999;">
-                <strong>— OR —</strong>
-            </div>
+                    <div class="input-group">
+                        <label for="eventDate">Event Date (Optional)</label>
+                        <input type="date" id="eventDate">
+                    </div>
 
-            <div class="input-group">
-                <label>Join an Existing Group</label>
-                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                    If someone shared a link with you, just paste it in your browser!
+                    <button onclick="createGroup()">Create Group</button>
+
+                    <p class="hero-reassure">Free · No accounts · No ads</p>
+                </div>
+
+                <!-- HERO SCREENSHOT — PLACEHOLDER, asset does not exist yet.
+                     Marked placeholder rather than a broken <img>. To swap in
+                     the real asset: drop hero-shot.webp and hero-shot.png
+                     (720x1280) into public/ and replace this whole <picture>
+                     with:
+
+                       <picture>
+                         <source srcset="/hero-shot.webp" type="image/webp">
+                         <img src="/hero-shot.png"
+                              alt="A ComeGiftIt wishlist seen by another member of the group: three gift ideas with price ranges and priority markers, two of them already showing a claimed badge."
+                              width="720" height="1280" fetchpriority="high">
+                       </picture>
+
+                     Eager by design -- above the fold, so no loading="lazy"
+                     and no fade-in. width/height are set to reserve space. -->
+                <picture class="hero-shot">
+                    <img src="/hero-shot-placeholder.svg"
+                         alt="Placeholder for the hero screenshot: a wishlist viewed by another member of the group, showing claimed badges, price ranges and priority markers."
+                         width="720" height="1280" fetchpriority="high">
+                </picture>
+            </section>
+
+            <!-- Block 2: three steps. The brief gives no visible heading for
+                 this block, so the <h2> that holds the hierarchy together is
+                 screen-reader only rather than invented copy on the page. -->
+            <section class="landing-block">
+                <h2 class="visually-hidden">How it works</h2>
+                <ol class="steps">
+                    <li>
+                        <h3>1. Create your group</h3>
+                        <p>Name it, pick the occasion, and you're done in about ten seconds.</p>
+                    </li>
+                    <li>
+                        <h3>2. Share one link</h3>
+                        <p>Text it, drop it in the group chat, email it. No signups for anyone.</p>
+                    </li>
+                    <li>
+                        <h3>3. Claim what you're buying</h3>
+                        <p>Everyone can see what's already taken — so nobody doubles up.</p>
+                    </li>
+                </ol>
+            </section>
+
+            <!-- Block 3: the differentiator. Carries the most visual weight
+                 of the three lower blocks. -->
+            <section class="surprise">
+                <h2>Your list looks completely normal to you.</h2>
+                <p>
+                    When someone claims a gift on your wishlist, you see nothing. No badge, no strikethrough, no hint that anything happened at all. Everyone else sees the full picture — who claimed what, what's been bought, who's splitting the cost of the expensive thing.
                 </p>
-            </div>
+                <p>
+                    You just get surprised on the day, like you're supposed to.
+                </p>
+            </section>
+
+            <!-- Block 4: video facade. The poster is a plain lazy-loaded
+                 image; the iframe is injected by playVideo() on click and at
+                 no other time. See VIDEO_EMBED_URL in the main script. -->
+            <section class="landing-block">
+                <h2>See it in action</h2>
+                <div class="video-facade" id="videoFacade">
+                    <img src="/video-poster-placeholder.svg"
+                         alt="Placeholder for the video poster frame."
+                         width="1280" height="720" loading="lazy" decoding="async">
+                    <button type="button" class="video-play" id="videoPlayBtn"
+                            onclick="playVideo()"
+                            aria-label="Play the 90 second ComeGiftIt walkthrough video">
+                        <span aria-hidden="true">▶</span>
+                    </button>
+                </div>
+                <p class="video-caption">90 seconds</p>
+                <p class="video-pending" id="videoPending" hidden>Video coming soon.</p>
+            </section>
+
+            <!-- Block 5: the year-round layer. -->
+            <section class="landing-block">
+                <h2>Works for more than Christmas</h2>
+                <p>
+                    Birthdays, anniversaries, Hanukkah, or anything else you're buying for as a group. Pick the occasion when you create the group and the app follows along.
+                </p>
+            </section>
+
+            <!-- Replaces the old "Join an Existing Group" panel, which only
+                 ever pointed people somewhere else and whose audience never
+                 reaches this screen anyway. -->
+            <p class="landing-note">
+                Got a link from someone? Just open it — it takes you straight to your group.
+            </p>
         </div>
 
         <!-- Join Screen -->
@@ -717,12 +1351,28 @@
             <h1>Join the Group</h1>
             <p class="tagline" id="groupNameDisplay"></p>
 
+            <div id="joinNotice" class="join-notice" style="display: none;"></div>
+
             <div class="input-group">
                 <label for="usernameInput">Enter Your Name</label>
                 <input type="text" id="usernameInput" placeholder="Your name" maxlength="100">
             </div>
 
             <button onclick="joinGroup()">Join Group</button>
+        </div>
+
+        <!-- Group Was Reset Screen -->
+        <div id="resetStateScreen" class="card hidden">
+            <h1>🗑️ Group Reset</h1>
+            <p class="tagline"><strong id="resetStateGroupName"></strong> was reset by the group creator.</p>
+            <p style="text-align: center; color: #666; margin: 15px 0;" id="resetStateDetail"></p>
+
+            <div id="resetStateUndoWrap" style="display: none;">
+                <button onclick="undoReset()">↩️ Undo the reset and restore everything</button>
+            </div>
+
+            <button onclick="window.location.hash = ''; window.location.reload();"
+                    style="background: #999; margin-top: 10px;">Start a new group</button>
         </div>
 
         <!-- Main App Screen -->
@@ -774,7 +1424,7 @@
             </div>
 
             <div class="input-group">
-                <label>Logged in as: <strong id="currentUsername"></strong></label>
+                <label>You're adding to: <strong id="currentUsername"></strong></label>
             </div>
 
             <div class="input-group">
@@ -813,7 +1463,18 @@
             <div id="wishlistsContainer" class="wishlists-grid"></div>
 
             <div id="resetGroupSection" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0; display: none;">
-                <button onclick="resetGroup()" class="btn-danger">🗑️ Reset Group (Creator Only)</button>
+                <button onclick="showResetConfirm()" class="btn-danger">🗑️ Reset Group (Creator Only)</button>
+            </div>
+
+            <!-- Persistent undo affordance after a reset. Deliberately not a
+                 toast: the person who just did this needs it to still be there
+                 while they work out what happened. -->
+            <div id="undoResetBanner" class="undo-reset-banner" style="display: none;">
+                <div>
+                    <strong>Group reset.</strong>
+                    <span id="undoResetDetail"></span>
+                </div>
+                <button onclick="undoReset()">Undo</button>
             </div>
         </div>
     </div>
@@ -856,7 +1517,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">How does it work?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    Create a group, share the link with your family/friends, and everyone adds their wishlist. When someone claims a gift, everyone else can see it's taken (but the recipient can't see that it was claimed or who claimed it). No more duplicate gifts!
+                    Create a group, share the link with your family and friends, and everyone adds their wishlist. When someone claims a gift, everyone else can see it's taken — the recipient can't. No more duplicate gifts!
                 </p>
             </div>
 
@@ -870,7 +1531,7 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Can the gift recipient see who claimed their items?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    ComeGiftIt never shows you who claimed your own gifts — your list looks exactly the same to you whether or not anything's been claimed. Everyone else in the group can see what's already taken, so nobody doubles up.
+                    ComeGiftIt never shows you who claimed your own gifts — your list looks exactly the same to you whether or not anything's been claimed. Everyone else in the group can see what's already taken, so nobody doubles up. Once your event date has passed, "Who Do I Thank?" tells you who bought what, so the thank you notes go to the right people.
                 </p>
             </div>
 
@@ -884,7 +1545,28 @@
             <div style="margin-bottom: 20px;">
                 <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">What if two people try to claim the same gift?</h3>
                 <p style="color: #555; line-height: 1.6; font-size: 14px;">
-                    The app updates in real-time, so if someone else claims a gift while you're looking, you'll see it immediately. You can also "split" a gift with someone if you want to go in together!
+                    Only one person can claim a gift. If someone beats you to it, ComeGiftIt tells you straight away instead of letting you both buy it. Everyone else's changes show up within about ten seconds. Want to go in on something together? Ask whoever claimed it to split — they get your request and can say yes or no.
+                </p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Can I use this on my phone and my computer?</h3>
+                <p style="color: #555; line-height: 1.6; font-size: 14px;">
+                    Yes. Open the link on your other device and enter the same name — ComeGiftIt will ask whether it's you or someone else with the same name. Pick "that's me" and both devices work on the same list.
+                </p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">Two of us have the same name. What happens?</h3>
+                <p style="color: #555; line-height: 1.6; font-size: 14px;">
+                    When you enter a name that's already in the group, ComeGiftIt shows you how many items that person has and asks whether it's you on another device or a different person. Choose "different person" and you'll get your own separate list.
+                </p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: var(--primary-color); font-size: 16px; margin-bottom: 8px;">I reset the group by accident!</h3>
+                <p style="color: #555; line-height: 1.6; font-size: 14px;">
+                    A reset can be undone for 30 days. Open the group and whoever created it will see an option to restore everything. After 30 days it's permanent.
                 </p>
             </div>
 
@@ -905,6 +1587,52 @@
     </div>
 
     <!-- Contact Modal -->
+    <!-- Privacy Modal. Expands the short privacy note in the About modal
+         into something a cautious parent can actually read. Same voice and
+         same markup pattern as About and FAQ. -->
+    <div id="privacyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Privacy</h2>
+                <button class="close-btn" onclick="hideModal('privacyModal')">&times;</button>
+            </div>
+            <p style="line-height: 1.6; color: #555;">
+                The short version: we keep as little as possible, we never ask who you are, and nothing here is sold or shared.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">What we store</h3>
+            <p style="line-height: 1.6; color: #555;">
+                The group name, the occasion and date you pick, the names people type when they join, and the wishlist items and details everyone adds — sizes, colours, links, that sort of thing. That is the whole list. If you would not want it on a fridge door, don't put it in a wishlist.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">No accounts, ever</h3>
+            <p style="line-height: 1.6; color: #555;">
+                There is nothing to sign up for. No password, no email address, no phone number, no "continue with" button. You type a first name so the rest of the group knows whose list is whose, and that is the only thing we ever ask you for.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">Anyone with the link can open the group</h3>
+            <p style="line-height: 1.6; color: #555;">
+                The link is the key. That is what makes it easy — nobody has to make an account to join — but it also means anyone you send it to can open the group and see the wishlists inside. Share it with the people you actually want in the group, and treat it the way you would treat the group chat itself.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">How long we keep it</h3>
+            <p style="line-height: 1.6; color: #555;">
+                Groups are kept for two years, then deleted automatically — so last year's list is still there when you want to look something up, and it does not sit around forever. If you write to us through the contact form, we store the name, email address and message you send, and delete those after twelve months.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">Deleting something sooner</h3>
+            <p style="line-height: 1.6; color: #555;">
+                Ask us. Use the <a onclick="hideModal('privacyModal'); showModal('contactModal');" class="inline-link">contact form</a>, tell us which group you mean, and we will remove it.
+            </p>
+
+            <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                <p style="font-size: 14px; color: #666;">
+                    <strong>🔒 No ads and no trackers.</strong> We don't run advertising, we don't sell anything to anyone, and there are no third-party tracking scripts on this page.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <div id="contactModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -973,6 +1701,48 @@
         </div>
     </div>
 
+    <!-- "Is this you?" prompt (brief 5.4).
+         Item count and join date only -- never item names. -->
+    <div id="disambiguationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="disambiguationTitle"></h2>
+                <button class="close-btn" onclick="hideModal('disambiguationModal')">&times;</button>
+            </div>
+            <p id="disambiguationDetail" style="text-align: center; color: #666; font-size: 15px; margin-bottom: 20px;"></p>
+
+            <!-- Both options get equal weight on purpose: two real people with
+                 the same name is the case this exists to catch. -->
+            <div class="disambiguation-choices">
+                <button onclick="confirmSameMember()">That's me — this is another device</button>
+                <button onclick="chooseDifferentName()">I'm a different person with the same name</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset confirmation (brief 5.7): typing the group name is required. -->
+    <div id="resetConfirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🗑️ Reset this group?</h2>
+                <button class="close-btn" onclick="hideModal('resetConfirmModal')">&times;</button>
+            </div>
+            <p style="color: #444; line-height: 1.6;">
+                This clears <strong id="resetConfirmGroupName"></strong> for everyone:
+                every wishlist, every item, and every claim.
+                <strong>It can be undone for 30 days</strong>, after which it is
+                permanent.
+            </p>
+            <div class="input-group">
+                <label for="resetConfirmInput">Type the group name to confirm</label>
+                <input type="text" id="resetConfirmInput" placeholder="Group name" maxlength="100"
+                       autocomplete="off" oninput="updateResetConfirmState()">
+            </div>
+            <button id="resetConfirmButton" class="btn-danger" onclick="resetGroup()" disabled>Reset Group</button>
+            <button onclick="hideModal('resetConfirmModal')" style="background: #999; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
     <!-- Thank You Modal -->
     <div id="thankYouModal" class="modal">
         <div class="modal-content">
@@ -991,6 +1761,7 @@
         <div class="footer-links">
             <a onclick="showModal('aboutModal')">About</a>
             <a onclick="showModal('faqModal')">FAQ</a>
+            <a onclick="showModal('privacyModal')">Privacy</a>
             <a onclick="showModal('contactModal')">Contact</a>
             <a href="https://liberapay.com/comegiftit" target="_blank">🌮 Donate</a>
         </div>
@@ -1016,7 +1787,198 @@
         let groupData = null;
         let groupId = null;
         let currentTheme = 'Christmas'; // Track current theme
+
+        // ============================================================
+        // Landing page video (brief section 5)
+        //
+        // The one place a video URL goes. Set it to the provider's *embed*
+        // URL and the block starts working -- nothing else needs changing:
+        //   const VIDEO_EMBED_URL = 'https://www.youtube.com/embed/XXXXXXXXXXX';
+        //
+        // Deliberately a facade, not an embed. A YouTube or Vimeo iframe
+        // drags over a megabyte of JavaScript on load, and this file is also
+        // the app, so every joiner on mobile data would pay for a video most
+        // of them never play. Until the button is clicked there is no iframe
+        // and no third-party request at all.
+        //
+        // HEADS UP: the CSP in server.js currently sets frame-src 'none', so
+        // the iframe is refused the moment it is injected, however valid the
+        // URL. Setting a URL here is necessary but NOT sufficient -- frame-src
+        // has to allow the provider too. That is a server change and so was
+        // out of scope for this pass; it is the one thing still standing
+        // between this block and a working video.
+        // ============================================================
+        const VIDEO_EMBED_URL = '';
         let expandedWishlists = {}; // Track which wishlists are expanded
+
+        // ============================================================
+        // Member identity (brief section 5)
+        // ------------------------------------------------------------
+        // The server issues a per-device token when you claim a name. It is
+        // stored per group, because one person can be in several groups under
+        // different names. None of this is visible in the normal flow -- no
+        // passwords, no PINs, no codes to keep. If a device loses its token it
+        // simply claims the name again.
+        // ============================================================
+
+        let memberToken = null;       // token for the current group, if we hold one
+        let isGroupCreator = false;   // server's answer, used for UX gating only
+        let groupMembers = [];        // from /members, for the device-count markers
+        let groupMeta = null;         // name/holiday/date/member names, all an
+                                      // un-joined visitor is given (brief 6.3)
+        let autoClaimAttempted = false; // migration re-claim is a once-per-load thing
+        let groupExistsOnServer = false;
+        let pendingJoinName = null;   // name awaiting the "is this you?" answer
+        let resetState = null;        // set when the group has been reset
+
+        function memberTokenKey(id) {
+            return `memberToken_${id}`;
+        }
+
+        function loadMemberToken(id) {
+            try {
+                return localStorage.getItem(memberTokenKey(id));
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function storeMemberToken(id, token) {
+            memberToken = token;
+            try {
+                localStorage.setItem(memberTokenKey(id), token);
+            } catch (error) {
+                // Private browsing and full quotas both land here. The token
+                // still works for this page view; the user just re-claims their
+                // name next time, which is invisible to them.
+                console.warn('Could not persist member token:', error);
+            }
+        }
+
+        function clearMemberToken(id) {
+            memberToken = null;
+            try {
+                localStorage.removeItem(memberTokenKey(id));
+            } catch (error) {
+                /* nothing useful to do */
+            }
+        }
+
+        // Every authenticated call goes through here.
+        //
+        // The token travels in a header, never a query string -- query strings
+        // land in server logs and Referer headers.
+        //
+        // X-Member-Name only matters on legacy groups whose creator has never
+        // claimed a device; the server ignores it otherwise.
+        async function apiFetch(url, options = {}, allowRetry = true) {
+            const headers = Object.assign({}, options.headers || {});
+            if (memberToken) headers['X-Member-Token'] = memberToken;
+            if (currentUser) headers['X-Member-Name'] = encodeURIComponent(currentUser);
+
+            const response = await fetch(url, Object.assign({}, options, { headers }));
+
+            // Self-healing (brief 5.10, extended): a token the server no longer
+            // recognises should not dump the user back to the join screen if we
+            // can quietly fix it. Re-claim the stored name, then retry once.
+            // Only if that fails do we actually interrupt them.
+            // Never in observer mode: the admin is not a member, and re-claiming
+            // would enrol "[ADMIN OBSERVER]" in somebody's family group.
+            if (response.status === 401 && allowRetry && currentUser && groupId && !window.isObserverMode) {
+                clearMemberToken(groupId);
+                const rejoined = await requestJoin(currentUser, { confirmExisting: true, silent: true });
+
+                if (rejoined && rejoined.token) {
+                    storeMemberToken(groupId, rejoined.token);
+                    isGroupCreator = Boolean(rejoined.isCreator);
+                    return apiFetch(url, options, false);
+                }
+
+                if (rejoined && rejoined.reset) {
+                    resetState = rejoined.reset;
+                    showResetScreen();
+                    return response;
+                }
+
+                handleLostIdentity();
+            }
+
+            return response;
+        }
+
+        // Ask the server to claim a name. Returns the parsed body, or null on a
+        // transport failure.
+        async function requestJoin(name, { confirmExisting = false, silent = false } = {}) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}/join`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, confirmExisting })
+                });
+
+                const result = await response.json().catch(() => null);
+
+                if (!result || (!result.success && !silent)) {
+                    showSaveError(result && result.message ? result.message : null);
+                    return null;
+                }
+
+                return result;
+            } catch (error) {
+                console.error('Error joining group:', error);
+                if (!silent) showSaveError('We could not reach the server.');
+                return null;
+            }
+        }
+
+        // The token is gone and re-claiming did not work. Say so plainly rather
+        // than letting writes fail silently.
+        function handleLostIdentity() {
+            if (groupId) clearMemberToken(groupId);
+            isGroupCreator = false;
+            const input = document.getElementById('usernameInput');
+            if (input && currentUser) input.value = currentUser;
+            showJoinNotice('This device needs to sign back in to the group. Enter your name to continue.');
+            showScreen('join');
+        }
+
+        // Creator gating in the UI.
+        //
+        // Prefer the server's answer (derived from the token). Fall back to the
+        // display-name comparison only for a legacy group whose creator has not
+        // claimed a device yet -- exactly the case the server still honours.
+        // This is for hiding buttons; the server is the enforcer.
+        function canActAsCreator() {
+            if (isGroupCreator) return true;
+            if (memberToken) return false;
+            return Boolean(groupData && groupData.createdBy) && groupData.createdBy === currentUser;
+        }
+
+        // Before joining we have groupMeta; after joining we have the real
+        // (filtered) blob. Both carry the group's name and who is in it, so
+        // read through one helper rather than teaching every caller about both.
+        function currentGroupName() {
+            if (groupData && groupData.groupName) return groupData.groupName;
+            if (groupMeta && groupMeta.groupName) return groupMeta.groupName;
+            return '';
+        }
+
+        function knownMemberNames() {
+            if (groupData && groupData.users) return Object.keys(groupData.users);
+            if (groupMeta && Array.isArray(groupMeta.memberNames)) return groupMeta.memberNames;
+            return [];
+        }
+
+        function showJoinNotice(message) {
+            const notice = document.getElementById('joinNotice');
+            if (!notice) return;
+            if (message) {
+                notice.textContent = message;
+                notice.style.display = 'block';
+            } else {
+                notice.style.display = 'none';
+            }
+        }
 
         // Theme configurations
         const themes = {
@@ -1173,9 +2135,40 @@
             }
         }
 
-        async function loadGroupAsObserver() {
+        // Brief 6.4: the public endpoint filters per viewer now, so observer
+        // mode reads the admin one instead -- already behind requireAdmin, and
+        // deliberately unfiltered. An admin debugging "who claimed Dad's
+        // sweater" needs to see the claims.
+        //
+        // The bearer token comes from the admin dashboard's own session. The
+        // observer tab is opened from admin.html with window.open() on the same
+        // origin, which hands it a copy of that sessionStorage.
+        function adminSessionToken() {
             try {
-                const response = await fetch(`/api/groups/${groupId}`);
+                return sessionStorage.getItem('adminToken');
+            } catch (error) {
+                return null;
+            }
+        }
+
+        async function loadGroupAsObserver() {
+            const adminToken = adminSessionToken();
+
+            if (!adminToken) {
+                alert('Observer mode needs an admin session. Open this from the admin dashboard.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/api/groups/${groupId}`, {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+
+                if (response.status === 401) {
+                    alert('Your admin session has expired. Sign in to the admin dashboard again.');
+                    return;
+                }
+
                 const result = await response.json();
 
                 if (result.success && result.data) {
@@ -1283,19 +2276,29 @@
                 }
             }
 
+            // Restore identity BEFORE loading the group: loadGroup() needs to
+            // know whether this device already holds a token, and a remembered
+            // name with no token is the Phase 2 migration path (brief 5.9).
+            let savedUsername = null;
+            try {
+                savedUsername = localStorage.getItem('currentUsername');
+            } catch (error) {
+                savedUsername = null;
+            }
+            if (savedUsername) {
+                currentUser = savedUsername;
+            }
+
+            initVideoFacade();
+
             // Check if there's a group ID in the URL
             const hash = window.location.hash.substring(1);
             if (hash) {
                 groupId = hash;
+                memberToken = loadMemberToken(groupId);
                 loadGroup();
             } else {
                 showScreen('welcome');
-            }
-
-            // Check for saved username
-            const savedUsername = localStorage.getItem('currentUsername');
-            if (savedUsername) {
-                currentUser = savedUsername;
             }
 
             // Poll for updates every 10 seconds
@@ -1340,13 +2343,54 @@
             document.getElementById('welcomeScreen').classList.add('hidden');
             document.getElementById('joinScreen').classList.add('hidden');
             document.getElementById('appScreen').classList.add('hidden');
+            document.getElementById('resetStateScreen').classList.add('hidden');
 
             if (screen === 'welcome') {
+                // Clear the head script's guard. Reaching here means we really
+                // are on the landing page, whatever the URL looked like on load.
+                document.documentElement.classList.remove('hash-route');
                 document.getElementById('welcomeScreen').classList.remove('hidden');
             } else if (screen === 'join') {
                 document.getElementById('joinScreen').classList.remove('hidden');
             } else if (screen === 'app') {
                 document.getElementById('appScreen').classList.remove('hidden');
+            }
+        }
+
+        // Landing page video facade. Swaps the poster for the real iframe on
+        // click -- the first and only moment a third-party request happens.
+        function playVideo() {
+            if (!VIDEO_EMBED_URL) return;
+
+            const facade = document.getElementById('videoFacade');
+            if (!facade) return;
+
+            const separator = VIDEO_EMBED_URL.indexOf('?') === -1 ? '?' : '&';
+            const iframe = document.createElement('iframe');
+            iframe.src = VIDEO_EMBED_URL + separator + 'autoplay=1';
+            iframe.title = 'ComeGiftIt walkthrough';
+            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+            iframe.allowFullscreen = true;
+
+            facade.replaceChildren(iframe);
+            iframe.focus();
+        }
+
+        // With no URL set yet, say so plainly rather than offering a button
+        // that does nothing. Both lines disappear on their own once
+        // VIDEO_EMBED_URL is filled in.
+        function initVideoFacade() {
+            if (VIDEO_EMBED_URL) return;
+
+            const button = document.getElementById('videoPlayBtn');
+            const pending = document.getElementById('videoPending');
+
+            if (button) {
+                button.disabled = true;
+                button.setAttribute('aria-label', 'Walkthrough video coming soon');
+            }
+            if (pending) {
+                pending.hidden = false;
             }
         }
 
@@ -1383,6 +2427,11 @@
 
             // Generate random group ID
             groupId = generateId();
+            // Nothing has been written to the server yet; joinGroup() writes it
+            // and then claims the creator's name.
+            groupExistsOnServer = false;
+            memberToken = null;
+            isGroupCreator = false;
             
             // Initialize group data
             groupData = {
@@ -1408,6 +2457,13 @@
         }
 
         // Join Group
+        //
+        // Two shapes, depending on whether the group exists on the server yet:
+        //
+        //  - Brand new group: this browser holds the only copy, so write it
+        //    first, then claim the name. The claimer becomes the creator.
+        //  - Existing group: claim the name FIRST. If it turns out to be taken
+        //    we must not have already written the member into the blob.
         async function joinGroup() {
             const username = document.getElementById('usernameInput').value.trim();
 
@@ -1416,49 +2472,228 @@
                 return;
             }
 
-            if (!groupData.users[username]) {
-                groupData.users[username] = { items: [] };
+            showJoinNotice(null);
+
+            if (!groupExistsOnServer) {
+                if (!groupData.users[username]) {
+                    groupData.users[username] = { items: [] };
+                }
+                if (!groupData.createdBy) {
+                    groupData.createdBy = username;
+                }
+
+                currentUser = username;
+                rememberUsername(username);
+
+                const saved = await saveData();
+                if (!saved) return;
+                groupExistsOnServer = true;
             }
 
-            if (!groupData.createdBy) {
-                groupData.createdBy = username;
+            await claimName(username, { confirmExisting: false });
+        }
+
+        // Claim a name on the server and, if it works, enter the app.
+        async function claimName(username, { confirmExisting = false } = {}) {
+            const result = await requestJoin(username, { confirmExisting });
+            if (!result) return false;
+
+            if (result.reset) {
+                resetState = result.reset;
+                showResetScreen();
+                return false;
             }
 
-            currentUser = username;
-            localStorage.setItem('currentUsername', username);
+            if (result.status === 'name_taken') {
+                pendingJoinName = username;
+                showDisambiguationPrompt(result);
+                return false;
+            }
 
-            // Save to database
-            await saveData();
+            if (!result.token) return false;
 
-            // Mark app as used
+            currentUser = result.name;
+            rememberUsername(result.name);
+            storeMemberToken(groupId, result.token);
+            isGroupCreator = Boolean(result.isCreator);
+
             markAppUsed();
             checkDonationBanner();
 
-            // Show app
+            // Re-read the group: joining may have added us to it server-side.
+            await loadGroup(true);
             showAppScreen();
+            return true;
+        }
+
+        function rememberUsername(name) {
+            try {
+                localStorage.setItem('currentUsername', name);
+            } catch (error) {
+                console.warn('Could not remember username:', error);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // "Is this you?" prompt (brief 5.4)
+        //
+        // Shows an item COUNT and a join date. Never item names -- a stranger
+        // must not be able to read a wishlist off the join screen.
+        //
+        // Both buttons carry equal weight on purpose. Two real Johns is the
+        // case this exists to catch, and people click the bigger button.
+        // ---------------------------------------------------------------
+        function showDisambiguationPrompt(info) {
+            const name = info.name;
+            const itemLabel = info.itemCount === 1 ? '1 item' : `${info.itemCount} items`;
+
+            let joinedLabel = '';
+            if (info.joinedAt) {
+                const joined = new Date(info.joinedAt);
+                if (!isNaN(joined)) {
+                    joinedLabel = ` · joined ${joined.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+                }
+            }
+
+            const deviceLabel = info.deviceCount > 1 ? ` · ${info.deviceCount} devices` : '';
+
+            document.getElementById('disambiguationTitle').textContent =
+                `${name} already has a list here.`;
+            document.getElementById('disambiguationDetail').textContent =
+                `${itemLabel}${joinedLabel}${deviceLabel}`;
+
+            // Make sure the join screen is what sits behind the modal, so
+            // dismissing it leaves the user somewhere sensible.
+            document.getElementById('groupNameDisplay').textContent = currentGroupName();
+            showScreen('join');
+            showModal('disambiguationModal');
+        }
+
+        // "That's me - this is another device"
+        async function confirmSameMember() {
+            const name = pendingJoinName;
+            hideModal('disambiguationModal');
+            if (!name) return;
+            await claimName(name, { confirmExisting: true });
+        }
+
+        // "I'm a different John" -- back to the name field with a suggestion
+        // pre-filled, which they can edit.
+        function chooseDifferentName() {
+            const name = pendingJoinName || '';
+            hideModal('disambiguationModal');
+
+            const input = document.getElementById('usernameInput');
+            if (input) {
+                input.value = suggestAlternativeName(name);
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+            }
+
+            showJoinNotice('Pick a name that tells you apart — you can change this before joining.');
+            showScreen('join');
+            pendingJoinName = null;
+        }
+
+        function suggestAlternativeName(name) {
+            const base = (name || '').trim();
+            if (!base) return '';
+
+            // "John" -> "John B.", then B, C, D... against names already in the
+            // group so the suggestion is not itself taken. Before joining, that
+            // list comes from the metadata payload; there are no wishlists to
+            // read it off yet.
+            const taken = new Set(knownMemberNames());
+            for (let i = 1; i < 26; i++) {
+                const candidate = `${base} ${String.fromCharCode(65 + i)}.`;
+                if (!taken.has(candidate)) return candidate;
+            }
+            return `${base} 2`;
         }
 
         // Load Group
         async function loadGroup(silent = false) {
             try {
-                const response = await fetch(`/api/groups/${groupId}`);
-                const result = await response.json();
+                const response = await apiFetch(`/api/groups/${groupId}`);
+                const result = await response.json().catch(() => null);
+
+                if (!result) {
+                    if (!silent) alert('Error loading group');
+                    return;
+                }
+
+                // The group was reset. Members get told that, not a 404.
+                if (result.reset) {
+                    resetState = result.reset;
+                    groupExistsOnServer = true;
+                    showResetScreen();
+                    return;
+                }
+
+                // Brief 6.3: we hold no token, so the server sent only what the
+                // join screen needs -- the group's name, holiday, date and the
+                // names already in it. No wishlists, no items, no claim data.
+                // There is nothing to render here but the door.
+                if (result.success && result.access === 'metadata') {
+                    groupMeta = result.meta || {};
+                    groupExistsOnServer = true;
+                    resetState = null;
+
+                    if (groupMeta.holiday) {
+                        applyTheme(groupMeta.holiday);
+                    }
+
+                    // A returning user from before member tokens existed: a
+                    // remembered name and nothing to prove it. Claiming the name
+                    // is the ordinary join flow, so for most people this happens
+                    // invisibly (brief 5.9).
+                    //
+                    // Once per page load, though. If the name comes back taken
+                    // the user has a question in front of them, and asking it
+                    // again on every 10-second poll would reopen the prompt
+                    // under their fingers.
+                    if (currentUser && !memberToken && !autoClaimAttempted) {
+                        autoClaimAttempted = true;
+                        await claimName(currentUser, { confirmExisting: false });
+                        return;
+                    }
+
+                    if (!silent) {
+                        document.getElementById('groupNameDisplay').textContent = groupMeta.groupName || '';
+                        showScreen('join');
+                    }
+                    return;
+                }
 
                 if (result.success && result.data) {
                     groupData = result.data;
+                    groupExistsOnServer = true;
+                    resetState = null;
 
-                    // Drop requests the owner has already answered by editing the item
-                    if (resolveInfoRequests()) {
-                        await saveData();
+                    // The server tells us who it thinks we are. Creator status
+                    // comes from the token, not from matching a display name.
+                    if (result.viewer) {
+                        currentUser = result.viewer.memberName;
+                        isGroupCreator = Boolean(result.viewer.isCreator);
                     }
-                    
+
+                    // An answered info-request is cleared by the server when the
+                    // owner edits the item, so this is only tidying the local
+                    // copy for rendering -- it no longer writes anything back.
+                    if (currentUser) resolveInfoRequests();
+
                     // Apply theme based on holiday type
                     if (groupData.holiday) {
                         applyTheme(groupData.holiday);
                     }
 
+                    // Reaching here means the server served us wishlists, which
+                    // it only does for a recognised token -- the migration
+                    // re-claim lives in the metadata branch above.
+
                     // If user is already logged in, show app
                     if (currentUser && groupData.users[currentUser]) {
+                        refreshMemberDevices();
                         showAppScreen();
                     } else {
                         // Show join screen
@@ -1475,6 +2710,115 @@
                 if (!silent) {
                     alert('Error loading group');
                 }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Device transparency (brief 5.6)
+        //
+        // Identity is claimed on trust, so make it visible: the member list
+        // shows how many devices each person has, and a new one gets a quiet
+        // line rather than a modal.
+        // ---------------------------------------------------------------
+        let knownDeviceCounts = null;
+        let newDeviceNotices = [];
+
+        async function refreshMemberDevices() {
+            try {
+                const response = await fetch(`/api/groups/${groupId}/members`);
+                const result = await response.json().catch(() => null);
+                if (!result || !result.success) return;
+
+                groupMembers = result.members || [];
+
+                const counts = {};
+                groupMembers.forEach(member => { counts[member.name] = member.deviceCount; });
+
+                if (knownDeviceCounts) {
+                    groupMembers.forEach(member => {
+                        const previous = knownDeviceCounts[member.name];
+                        if (previous !== undefined && member.deviceCount > previous) {
+                            const latest = member.devices[member.devices.length - 1];
+                            newDeviceNotices.push({
+                                name: member.name,
+                                label: latest ? latest.label : 'a new device'
+                            });
+                        }
+                    });
+                }
+
+                knownDeviceCounts = counts;
+                renderWishlists();
+            } catch (error) {
+                // Purely informational; never worth interrupting anyone over.
+                console.warn('Could not load member devices:', error);
+            }
+        }
+
+        function deviceCountFor(name) {
+            const member = groupMembers.find(entry => entry.name === name);
+            return member ? member.deviceCount : 0;
+        }
+
+        function dismissDeviceNotice(index) {
+            newDeviceNotices.splice(index, 1);
+            renderWishlists();
+        }
+
+        // ---------------------------------------------------------------
+        // "This group was reset" state (brief 5.7)
+        // ---------------------------------------------------------------
+        function showResetScreen() {
+            if (!resetState) return;
+
+            const nameEl = document.getElementById('resetStateGroupName');
+            const detailEl = document.getElementById('resetStateDetail');
+            const undoWrap = document.getElementById('resetStateUndoWrap');
+
+            if (nameEl) nameEl.textContent = resetState.groupName || 'This group';
+
+            if (detailEl) {
+                const until = new Date(resetState.undoAvailableUntil);
+                if (!resetState.undoAvailable || isNaN(until)) {
+                    detailEl.textContent = 'The 30-day window to undo this reset has passed.';
+                } else if (resetState.canUndo) {
+                    detailEl.textContent = `The wishlists are still recoverable until ${until.toLocaleDateString()}.`;
+                } else {
+                    // Only the creator can undo. Saying so beats offering a
+                    // button that can only come back 403.
+                    detailEl.textContent = `The wishlists are still recoverable until ${until.toLocaleDateString()}, but only whoever created the group can restore them.`;
+                }
+            }
+
+            // The undo affordance persists -- it is not a toast that vanishes
+            // while the person is still working out what happened. It is shown
+            // only to someone who can actually use it.
+            if (undoWrap) {
+                undoWrap.style.display = (resetState.undoAvailable && resetState.canUndo) ? 'block' : 'none';
+            }
+
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('joinScreen').classList.add('hidden');
+            document.getElementById('appScreen').classList.add('hidden');
+            document.getElementById('resetStateScreen').classList.remove('hidden');
+        }
+
+        async function undoReset() {
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/undo-reset`, { method: 'POST' });
+                const result = await response.json().catch(() => null);
+
+                if (result && result.success) {
+                    resetState = null;
+                    document.getElementById('resetStateScreen').classList.add('hidden');
+                    await loadGroup();
+                    return;
+                }
+
+                showSaveError(result && result.message ? result.message : null);
+            } catch (error) {
+                console.error('Error undoing reset:', error);
+                showSaveError('We could not reach the server.');
             }
         }
 
@@ -1504,11 +2848,7 @@
 
             // Show/hide reset button based on creator status
             const resetSection = document.getElementById('resetGroupSection');
-            if (currentUser === groupData.createdBy) {
-                resetSection.style.display = 'block';
-            } else {
-                resetSection.style.display = 'none';
-            }
+            resetSection.style.display = canActAsCreator() ? 'block' : 'none';
 
             // Show/hide "Who Do I Thank?" button if event date has passed
             checkAndShowThankYouButton();
@@ -1522,7 +2862,14 @@
         // Check if event date has passed and show thank you button
         function checkAndShowThankYouButton() {
             const thankYouSection = document.getElementById('thankYouSection');
-            
+
+            // The reveal answers about the CALLER's own list, and an observer
+            // has none. Admins read claim data from the admin endpoint instead.
+            if (window.isObserverMode) {
+                thankYouSection.style.display = 'none';
+                return;
+            }
+
             if (!groupData.eventDate) {
                 thankYouSection.style.display = 'none';
                 return;
@@ -1541,17 +2888,57 @@
         }
 
         // Show thank you modal with gift givers
-        function showThankYouModal() {
+        //
+        // The buyers are no longer in the copy of the group this browser holds:
+        // claim data on your own items is stripped server-side (brief 6.2), and
+        // that is the whole point of the app. So the reveal is fetched, from an
+        // endpoint that only answers about your own list and only once the
+        // event has actually happened.
+        async function showThankYouModal() {
             const content = document.getElementById('thankYouContent');
-            
-            if (!groupData.users[currentUser]) {
-                content.innerHTML = '<p style="text-align: center; color: #666;">No wishlist found.</p>';
-                showModal('thankYouModal');
+
+            content.innerHTML = '<p style="text-align: center; color: #666;">Loading…</p>';
+            showModal('thankYouModal');
+
+            let result = null;
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/thank-you`);
+                result = await response.json().catch(() => null);
+            } catch (error) {
+                console.error('Error loading thank-you list:', error);
+            }
+
+            if (!result || !result.success) {
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <p style="color: #666;">We could not load your gift list just now.</p>
+                        <p style="font-size: 14px; color: #999;">Please check your connection and try again.</p>
+                    </div>
+                `;
                 return;
             }
 
-            const myItems = groupData.users[currentUser].items;
-            const purchasedItems = myItems.filter(item => item.purchased && item.claimedBy && item.claimedBy.length > 0);
+            if (result.reset) {
+                resetState = result.reset;
+                hideModal('thankYouModal');
+                showResetScreen();
+                return;
+            }
+
+            if (!result.available) {
+                const message = result.reason === 'no_event_date'
+                    ? 'This group has no event date set, so there is nothing to unlock yet.'
+                    : 'Your event has not happened yet — no peeking!';
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <p style="color: #666; margin-bottom: 15px;">${escapeHtml(message)}</p>
+                        <p style="font-size: 14px; color: #999;">Who bought what for you stays hidden until the day after your event.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const purchasedItems = Array.isArray(result.gifts) ? result.gifts : [];
 
             if (purchasedItems.length === 0) {
                 content.innerHTML = `
@@ -1567,29 +2954,28 @@
                     </p>
                 `;
 
-                purchasedItems.forEach(item => {
-                    const buyers = item.claimedBy.join(', ');
-                    const isSplit = item.claimedBy.length > 1;
-                    
+                purchasedItems.forEach(gift => {
+                    const buyerList = Array.isArray(gift.buyers) ? gift.buyers : [];
+                    const buyers = buyerList.join(', ');
+                    const isSplit = buyerList.length > 1;
+
                     html += `
                         <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #2ecc71;">
                             <div style="font-weight: 600; color: #333; margin-bottom: 5px;">
-                                ${escapeHtml(item.description)}
+                                ${escapeHtml(gift.description)}
                             </div>
                             <div style="font-size: 14px; color: #2ecc71; margin-top: 5px;">
                                 💝 ${isSplit ? 'Split gift from' : 'Gift from'}: <strong>${escapeHtml(buyers)}</strong>
                             </div>
-                            ${item.price ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">Price range: ${escapeHtml(item.price)}</div>` : ''}
+                            ${gift.price ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">Price range: ${escapeHtml(gift.price)}</div>` : ''}
                         </div>
                     `;
                 });
 
                 // Summary
                 const uniqueBuyers = new Set();
-                purchasedItems.forEach(item => {
-                    if (item.claimedBy) {
-                        item.claimedBy.forEach(buyer => uniqueBuyers.add(buyer));
-                    }
+                purchasedItems.forEach(gift => {
+                    (gift.buyers || []).forEach(buyer => uniqueBuyers.add(buyer));
                 });
 
                 html += `
@@ -1602,8 +2988,6 @@
 
                 content.innerHTML = html;
             }
-
-            showModal('thankYouModal');
         }
 
         // Toggle wishlist expansion
@@ -1636,6 +3020,20 @@
             const container = document.getElementById('wishlistsContainer');
             container.innerHTML = '';
 
+            // A new device on an existing member is surfaced as a quiet line,
+            // not a modal (brief 5.6). Since anyone can claim a name, the
+            // group seeing that a name gained a device IS the enforcement
+            // mechanism in this design.
+            newDeviceNotices.forEach((notice, index) => {
+                const line = document.createElement('div');
+                line.className = 'new-device-note';
+                line.innerHTML = `
+                    <span>📱 <strong>${escapeHtml(notice.name)}</strong> added a new device (${escapeHtml(notice.label)}).</span>
+                    <button onclick="dismissDeviceNotice(${index})">Dismiss</button>
+                `;
+                container.appendChild(line);
+            });
+
             // Sort users so current user appears first
             const sortedUsers = Object.entries(groupData.users).sort(([usernameA], [usernameB]) => {
                 if (usernameA === currentUser) return -1;
@@ -1659,7 +3057,10 @@
                         <h3>${escapeHtml(username)} ${hasPurchasedFromUser ? '<span style="color: #2ecc71; font-size: 18px;" title="You have purchased gifts for this person">✓</span>' : ''}</h3>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 14px; color: #666;">${user.items.length} items</span>
-                            ${!window.isObserverMode && currentUser === groupData.createdBy && username !== currentUser ?
+                            ${deviceCountFor(username) > 1
+                                ? `<span class="device-marker" title="${escapeHtml(username)} is signed in on ${deviceCountFor(username)} devices">📱 ${deviceCountFor(username)} devices</span>`
+                                : ''}
+                            ${!window.isObserverMode && canActAsCreator() && username !== currentUser ?
                                 `<button onclick="deleteUser('${escapeJsAttr(username)}')" style="background: #f5576c !important; color: white !important; font-size: 11px; padding: 4px 8px; width: auto; margin: 0; border-radius: 5px;" title="Remove this user from the group">Remove User</button>`
                                 : ''}
                         </div>
@@ -1719,7 +3120,7 @@
 
                         // Delete button for own items (X in top right) - not in observer mode
                         if (isOwnWishlist && !window.isObserverMode) {
-                            html += `<button onclick="deleteItem(${index})" class="delete-item-btn" title="Delete this item">×</button>`;
+                            html += `<button onclick="deleteItem('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" class="delete-item-btn" title="Delete this item">×</button>`;
                         }
                         
                         html += `<div class="item-description">${escapeHtml(item.description)}</div>`;
@@ -1760,7 +3161,7 @@
 
                         // Edit button section
                         // Show edit button if: 1) it's your own item, OR 2) you're the group creator
-                        const canEdit = isOwnWishlist || (currentUser === groupData.createdBy);
+                        const canEdit = isOwnWishlist || canActAsCreator();
 
                         // Only show action buttons if NOT in observer mode
                         if (!window.isObserverMode && (canEdit || !isOwnWishlist)) {
@@ -1768,7 +3169,7 @@
 
                             // Edit button - show for own items OR if you're the creator
                             if (canEdit) {
-                                html += `<button onclick="showEditItemModal('${escapeJsAttr(username)}', ${index})" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
+                                html += `<button onclick="showEditItemModal('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" style="background: #6c757d !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✏️ Edit</button>`;
                             }
 
                             // Gift coordination buttons (only show for others' wishlists)
@@ -1777,22 +3178,70 @@
                                 if (hasRequestedInfo(username, item)) {
                                     html += `<button disabled style="background: #e0e0e0 !important; color: #777 !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0; box-shadow: none; cursor: default;" title="You already asked for more info on this item">✓ Info Requested</button>`;
                                 } else {
-                                    html += `<button onclick="requestMoreInfo('${escapeJsAttr(username)}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Anonymously ask for more details - they won't know it was you">❓ Ask for More Info</button>`;
+                                    html += `<button onclick="requestMoreInfo('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Anonymously ask for more details - they won't know it was you">❓ Ask for More Info</button>`;
                                 }
 
                                 if (!isPurchased) {
                                     if (claimedByMe) {
-                                        html += `<button onclick="unclaimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
-                                        html += `<button onclick="markPurchased('${escapeJsAttr(username)}', ${index})" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
+                                        // Addressed by item id, not index: these three
+                                        // go to the action endpoints, where the item has
+                                        // to be identifiable after somebody else has
+                                        // added or removed one (brief 7.2).
+                                        html += `<button onclick="unclaimItem('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Unclaim</button>`;
+                                        html += `<button onclick="markPurchased('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" class="btn-success" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">✓ Purchased</button>`;
                                     } else if (!isClaimed) {
-                                        html += `<button onclick="claimItem('${escapeJsAttr(username)}', ${index})" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
+                                        html += `<button onclick="claimItem('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Claim</button>`;
                                     } else {
-                                        html += `<button onclick="splitGift('${escapeJsAttr(username)}', ${index})" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;">Split Gift</button>`;
+                                        // Claimed by someone else: you can ask to go in on it.
+                                        const myRequests = (item.splitRequests || []).filter(r => r.from === currentUser);
+                                        const pending = myRequests.find(r => r.status === 'pending');
+                                        if (pending) {
+                                            html += `<button disabled style="background: #e0e0e0 !important; color: #777 !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0; box-shadow: none; cursor: default;" title="Waiting for an answer">⏳ Split Requested</button>`;
+                                        } else if (myRequests.length >= 2) {
+                                            html += `<button disabled style="background: #e0e0e0 !important; color: #777 !important; font-size: 12px; padding: 6px 12px; width: auto; margin: 0; box-shadow: none; cursor: default;" title="You have already asked about this one twice">Split Gift</button>`;
+                                        } else {
+                                            html += `<button onclick="requestSplit('${escapeJsAttr(username)}', '${escapeJsAttr(item.id || '')}')" class="btn-secondary" style="font-size: 12px; padding: 6px 12px; width: auto; margin: 0;" title="Ask whoever claimed this to split it with you">🤝 Ask to Split</button>`;
+                                        }
                                     }
                                 }
                             }
 
                             html += '</div>';
+                        }
+
+                        // Someone has asked to go in on a gift you claimed.
+                        // Shown only to the claimers -- the gift's owner never
+                        // sees any of this, because the whole block is stripped
+                        // from their copy server-side.
+                        if (!isOwnWishlist && !window.isObserverMode) {
+                            (item.splitRequests || []).forEach(request => {
+                                const iAmClaimer = Array.isArray(item.claimedBy) && item.claimedBy.includes(currentUser);
+
+                                if (request.status === 'pending' && iAmClaimer && request.from !== currentUser) {
+                                    html += `
+                                        <div class="split-request-note">
+                                            <span>🤝 <strong>${escapeHtml(request.from)}</strong> wants to split this with you.</span>
+                                            <span class="split-request-actions">
+                                                <button onclick="respondToSplit('${escapeJsAttr(request.id)}', true)" class="btn-success">Yes, split it</button>
+                                                <button onclick="respondToSplit('${escapeJsAttr(request.id)}', false)">No thanks</button>
+                                            </span>
+                                        </div>
+                                    `;
+                                }
+
+                                // Your own answer, come back to you. A silent
+                                // decline would leave you waiting forever.
+                                if (request.from === currentUser && request.status === 'declined' && !request.dismissed) {
+                                    html += `
+                                        <div class="split-request-note declined">
+                                            <span>🙁 ${escapeHtml(request.to || 'They')} declined the split on this one.</span>
+                                            <span class="split-request-actions">
+                                                <button onclick="dismissSplitDecline('${escapeJsAttr(request.id)}')">OK</button>
+                                            </span>
+                                        </div>
+                                    `;
+                                }
+                            });
                         }
 
                         // Anonymous request hint on your own item
@@ -1907,11 +3356,10 @@
         }
 
         // Send an anonymous request for more info on someone else's item
-        async function requestMoreInfo(username, itemIndex) {
+        async function requestMoreInfo(username, itemId) {
             if (window.isObserverMode) return;
 
-            const user = groupData.users[username];
-            const item = user && user.items[itemIndex];
+            const item = findRenderedItem(username, itemId);
             if (!item) return;
 
             if (username === currentUser) {
@@ -1931,16 +3379,14 @@
             );
             if (!confirmed) return;
 
-            const existing = item.infoRequest;
-            item.infoRequest = {
-                count: Math.min((existing && existing.count ? existing.count : 0) + 1, 99),
-                signature: itemInfoSignature(item),
-                lastRequestedAt: new Date().toISOString()
-            };
+            const result = await callGroupEndpoint(`/items/${encodeURIComponent(itemId)}/info-request`);
+            if (!result) return;
 
+            // The count comes back from the server; who asked is never sent
+            // there in the first place.
+            item.infoRequest = result.item.infoRequest;
             rememberInfoRequest(username, item);
 
-            await saveData();
             renderWishlists();
 
             alert(`Sent anonymously. ${username} will be asked to add more details.`);
@@ -1948,6 +3394,8 @@
 
         // Clear requests on your own items once you've actually changed the listing.
         // Only the owner clears their own items, so polling clients don't race to save.
+        // Local tidy-up only. PATCH /items/:itemId is what actually clears an
+        // answered request in storage.
         function resolveInfoRequests() {
             if (window.isObserverMode) return false;
             if (!currentUser || !groupData.users || !groupData.users[currentUser]) return false;
@@ -2046,23 +3494,18 @@
                 return;
             }
 
-            const item = {
-                id: generateId(),
-                description: description,
-                priority: priority,
-                price: price,
-                details: details,
-                notes: '',
-                claimedBy: [],
-                purchased: false,
-                splitWith: []
-            };
+            // The server appends the item and hands back the stored version,
+            // id and all. Two people adding at the same moment now both land,
+            // instead of whichever saved last replacing the other.
+            const result = await callGroupEndpoint('/items', {
+                body: { description, priority, price, details }
+            });
+            if (!result) return;
 
             if (!groupData.users[currentUser]) {
                 groupData.users[currentUser] = { items: [] };
             }
-
-            groupData.users[currentUser].items.push(item);
+            groupData.users[currentUser].items.push(result.item);
 
             // Auto-expand user's own wishlist to see the new item
             expandedWishlists[currentUser] = true;
@@ -2073,23 +3516,29 @@
             document.getElementById('itemPrice').value = '';
             document.getElementById('itemDetails').value = '';
 
-            await saveData();
             renderWishlists();
         }
 
         // Delete Item
-        async function deleteItem(index) {
-            if (confirm('Are you sure you want to delete this item?')) {
-                groupData.users[currentUser].items.splice(index, 1);
-                await saveData();
-                renderWishlists();
+        async function deleteItem(username, itemId) {
+            if (!confirm('Are you sure you want to delete this item?')) return;
+
+            const result = await callGroupEndpoint(`/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+            if (!result) return;
+
+            const user = groupData.users[username];
+            if (user && Array.isArray(user.items)) {
+                user.items = user.items.filter(item => item.id !== itemId);
             }
+            renderWishlists();
         }
 
         // Delete User (Group Creator Only)
+        //
+        // The server enforces this now; the check here is for UX, so the
+        // button is not offered to people who cannot use it.
         async function deleteUser(username) {
-            // Check if current user is the group creator
-            if (currentUser !== groupData.createdBy) {
+            if (!canActAsCreator()) {
                 alert('Only the group creator can remove users');
                 return;
             }
@@ -2100,36 +3549,36 @@
                 return;
             }
 
-            if (confirm(`Are you sure you want to remove ${username} from the group? This will delete their wishlist and all associated data.`)) {
-                // Remove the user's wishlist
-                delete groupData.users[username];
-                
-                // Remove this user from any claims they made on other users' items
-                for (const [otherUsername, userData] of Object.entries(groupData.users)) {
-                    if (userData.items) {
-                        userData.items.forEach(item => {
-                            if (item.claimedBy && Array.isArray(item.claimedBy)) {
-                                item.claimedBy = item.claimedBy.filter(name => name !== username);
-                            }
-                            if (item.splitWith && Array.isArray(item.splitWith)) {
-                                item.splitWith = item.splitWith.filter(name => name !== username);
-                            }
-                        });
-                    }
-                }
-                
-                await saveData();
-                renderWishlists();
+            // Same shape as the reset confirmation but a smaller blast radius,
+            // so naming the person and their item count is enough (brief 5.7).
+            const user = groupData.users[username];
+            const itemCount = user && Array.isArray(user.items) ? user.items.length : 0;
+            const itemLabel = itemCount === 1 ? '1 item' : `${itemCount} items`;
+
+            if (!confirm(`Remove ${username} from the group?\n\nThis deletes their wishlist (${itemLabel}) and removes them from anything they had claimed. It cannot be undone.`)) {
+                return;
             }
+
+            // The server unpicks their claims and deletes their devices; this
+            // browser cannot, because claims on its own list are filtered out
+            // of the copy it holds.
+            const result = await callGroupEndpoint(`/members/${encodeURIComponent(username)}`, { method: 'DELETE' });
+            if (!result) return;
+
+            await loadGroup(true);
+            renderWishlists();
         }
 
         // Edit Item (Users can edit their own items, Group Creator can edit all items)
         let editingUser = null;
-        let editingIndex = null;
+        // The id, not the index. The 10-second poll replaces groupData wholesale
+        // while this modal is open, and an index held across that lands on a
+        // different item.
+        let editingItemId = null;
 
-        function showEditItemModal(username, itemIndex) {
+        function showEditItemModal(username, itemId) {
             // Check if current user can edit this item (own item OR is group creator)
-            const canEdit = (username === currentUser) || (currentUser === groupData.createdBy);
+            const canEdit = (username === currentUser) || canActAsCreator();
             
             if (!canEdit) {
                 alert('You can only edit your own items');
@@ -2137,9 +3586,13 @@
             }
 
             editingUser = username;
-            editingIndex = itemIndex;
-            
-            const item = groupData.users[username].items[itemIndex];
+            editingItemId = itemId;
+
+            const item = findRenderedItem(username, itemId);
+            if (!item) {
+                showActionNotice('That item is no longer on the list.');
+                return;
+            }
             
             // Populate the edit form
             document.getElementById('editItemDescription').value = item.description || '';
@@ -2151,7 +3604,7 @@
         }
 
         async function saveEditedItem() {
-            if (!editingUser || editingIndex === null) return;
+            if (!editingUser || !editingItemId) return;
             
             const description = document.getElementById('editItemDescription').value.trim();
             const priority = document.getElementById('editItemPriority').value;
@@ -2163,84 +3616,228 @@
                 return;
             }
             
-            // Update the item
-            const item = groupData.users[editingUser].items[editingIndex];
-            item.description = description;
-            item.priority = priority;
-            item.price = price;
-            item.details = details;
+            const result = await callGroupEndpoint(`/items/${encodeURIComponent(editingItemId)}`, {
+                method: 'PATCH',
+                body: { description, priority, price, details }
+            });
+            if (!result) return;
 
-            // Updating the listing answers any anonymous request for more info
-            if (item.infoRequest && item.infoRequest.signature !== itemInfoSignature(item)) {
-                delete item.infoRequest;
-            }
+            // The server decides whether the edit answered an anonymous request
+            // for more detail, and hands back the item either way.
+            const item = findRenderedItem(editingUser, editingItemId);
+            if (item) Object.assign(item, result.item);
 
-            await saveData();
             renderWishlists();
             hideModal('editItemModal');
-            
-            // Reset editing state
+
             editingUser = null;
-            editingIndex = null;
+            editingItemId = null;
         }
 
-        // Claim Item
-        async function claimItem(username, itemIndex) {
-            const item = groupData.users[username].items[itemIndex];
-            
-            if (!item.claimedBy) {
-                item.claimedBy = [];
-            }
+        // ============================================================
+        // Claim / unclaim / purchase (brief 7.2)
+        // ------------------------------------------------------------
+        // These three no longer post the whole group. Each is a single call
+        // naming the item by its stable id, applied by the server inside a
+        // transaction -- so when two people claim the same gift at the same
+        // moment, one of them is told, instead of one change quietly vanishing.
+        //
+        // Items are addressed by id, never by array index: an index means a
+        // different item the moment anyone adds or deletes one.
+        // ============================================================
 
-            if (!item.claimedBy.includes(currentUser)) {
-                item.claimedBy.push(currentUser);
-                await saveData();
+        // Ask the server to apply one action to one item.
+        //
+        // Returns the updated claim state on success, or null once the failure
+        // has been shown to the user. Every failure path ends with the group
+        // re-read, because every one of them means this tab's copy is stale.
+        async function applyItemAction(username, item, action, body) {
+            if (!item || !item.id) {
+                // An item this browser is holding from before the server gave
+                // it an id. Nothing to address it by; a re-read fixes it.
+                await loadGroup(true);
                 renderWishlists();
+                showActionNotice('That list was out of date — it has been refreshed, please try again.');
+                return null;
             }
+
+            let response;
+            try {
+                response = await apiFetch(
+                    `/api/groups/${groupId}/items/${encodeURIComponent(item.id)}/${action}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body || {})
+                    }
+                );
+            } catch (error) {
+                console.error(`Error applying ${action}:`, error);
+                showSaveError('We could not reach the server.');
+                return null;
+            }
+
+            const result = await response.json().catch(() => null);
+
+            if (result && result.reset) {
+                resetState = result.reset;
+                showResetScreen();
+                return null;
+            }
+
+            if (response.status === 409 || response.status === 404) {
+                // Somebody got there first, or the item is gone. Show what
+                // actually happened, then put the truth on screen.
+                showActionNotice(result && result.message
+                    ? `${result.message} Refreshing to show what changed.`
+                    : 'That gift just changed — refreshing to show the latest.');
+                await loadGroup(true);
+                renderWishlists();
+                return null;
+            }
+
+            if (!response.ok || !result || !result.success) {
+                showSaveError(result && result.message ? result.message : null);
+                return null;
+            }
+
+            // Patch the local copy from the server's answer rather than
+            // guessing; the next poll reconciles everything else.
+            const local = groupData.users[username]
+                && groupData.users[username].items.find(entry => entry.id === item.id);
+            if (local) {
+                local.claimedBy = result.item.claimedBy;
+                local.purchased = result.item.purchased;
+                local.splitWith = result.item.splitWith;
+            }
+
+            hideSaveError();
+            return result.item;
         }
 
-        // Unclaim Item
-        async function unclaimItem(username, itemIndex) {
-            const item = groupData.users[username].items[itemIndex];
-            
-            if (item.claimedBy) {
-                item.claimedBy = item.claimedBy.filter(name => name !== currentUser);
+        // Call a granular endpoint that is not one of the three claim actions.
+        // Returns the parsed body on success, or null once the failure has been
+        // put in front of the user.
+        //
+        // A 404 or 409 here means this tab is looking at a copy of the group
+        // that has moved on, so every one of those paths ends in a re-read.
+        async function callGroupEndpoint(path, { method = 'POST', body, onConflict } = {}) {
+            let response;
+            try {
+                response = await apiFetch(`/api/groups/${groupId}${path}`, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body === undefined ? '{}' : JSON.stringify(body)
+                });
+            } catch (error) {
+                console.error(`Error calling ${path}:`, error);
+                showSaveError('We could not reach the server.');
+                return null;
             }
 
-            if (item.splitWith) {
-                item.splitWith = item.splitWith.filter(name => name !== currentUser);
+            const result = await response.json().catch(() => null);
+
+            if (result && result.reset) {
+                resetState = result.reset;
+                showResetScreen();
+                return null;
             }
 
-            await saveData();
+            if (response.status === 404 || response.status === 409) {
+                const message = (result && result.message) || 'That has changed since you loaded the page.';
+                if (onConflict) onConflict(message, result);
+                else showActionNotice(`${message} Refreshing to show what changed.`);
+                await loadGroup(true);
+                renderWishlists();
+                return null;
+            }
+
+            if (!response.ok || !result || !result.success) {
+                showSaveError(result && result.message ? result.message : null);
+                return null;
+            }
+
+            hideSaveError();
+            return result;
+        }
+
+        async function claimItem(username, itemId) {
+            const item = findRenderedItem(username, itemId);
+            if (!await applyItemAction(username, item, 'claim')) return;
             renderWishlists();
         }
 
-        // Split Gift
-        async function splitGift(username, itemIndex) {
-            const item = groupData.users[username].items[itemIndex];
-            
-            if (!item.splitWith) {
-                item.splitWith = [];
+        async function unclaimItem(username, itemId) {
+            const item = findRenderedItem(username, itemId);
+            if (!await applyItemAction(username, item, 'unclaim')) return;
+            renderWishlists();
+        }
+
+        // Look an item up by the id the button was rendered with. Returns
+        // undefined if the list has moved on, which applyItemAction handles.
+        function findRenderedItem(username, itemId) {
+            const user = groupData.users && groupData.users[username];
+            if (!user || !Array.isArray(user.items)) return undefined;
+            return user.items.find(item => item && item.id === itemId);
+        }
+
+        // ============================================================
+        // Splitting a gift (brief 7.4)
+        // ------------------------------------------------------------
+        // You used to be able to join someone else's claim by clicking a
+        // button. Now you ask, and they answer. Mary needs to know it is Bob
+        // asking, so unlike the anonymous info request this one is signed.
+        // ============================================================
+        async function requestSplit(username, itemId) {
+            const item = findRenderedItem(username, itemId);
+            if (!item) return;
+
+            const claimer = Array.isArray(item.claimedBy) && item.claimedBy.length > 0
+                ? item.claimedBy.join(' and ')
+                : 'whoever claimed it';
+
+            if (!confirm(`Ask ${claimer} to split "${item.description}" with you?\n\nThey can say yes or no. ${username} won't see any of this.`)) {
+                return;
             }
 
-            if (!item.claimedBy.includes(currentUser) && !item.splitWith.includes(currentUser)) {
-                item.claimedBy.push(currentUser);
-                item.splitWith.push(currentUser);
-                await saveData();
-                renderWishlists();
-            } else {
-                alert("You're already part of this gift!");
-            }
+            const result = await callGroupEndpoint(`/items/${encodeURIComponent(itemId)}/split-request`);
+            if (!result) return;
+
+            item.splitRequests = (item.splitRequests || []).concat([result.request]);
+            renderWishlists();
+            showActionNotice(`Asked ${claimer}. You'll see their answer here.`);
+        }
+
+        // Answer a request to split something you claimed.
+        async function respondToSplit(requestId, accept) {
+            const result = await callGroupEndpoint(`/split-requests/${encodeURIComponent(requestId)}/respond`, {
+                body: { accept }
+            });
+            if (!result) return;
+
+            await loadGroup(true);
+            renderWishlists();
+        }
+
+        // Acknowledge a decline so it stops being shown.
+        async function dismissSplitDecline(requestId) {
+            const result = await callGroupEndpoint(`/split-requests/${encodeURIComponent(requestId)}/dismiss`);
+            if (!result) return;
+
+            await loadGroup(true);
+            renderWishlists();
         }
 
         // Mark as Purchased
-        async function markPurchased(username, itemIndex) {
+        async function markPurchased(username, itemId) {
             if (confirm('Mark this gift as purchased?')) {
-                groupData.users[username].items[itemIndex].purchased = true;
-                
-                await saveData();
+                const item = findRenderedItem(username, itemId);
+                // Send the state we want rather than asking for a toggle, so a
+                // double tap cannot undo itself.
+                if (!await applyItemAction(username, item, 'purchase', { purchased: true })) return;
+
                 renderWishlists(); // Show the purchased state first
-                
+
                 // Wait 1.5 seconds so user can see the item marked as purchased,
                 // then collapse the wishlist
                 setTimeout(() => {
@@ -2250,27 +3847,84 @@
             }
         }
 
-        // Reset Group
+        // ---------------------------------------------------------------
+        // Reset Group (brief 5.7)
+        //
+        // Two guards, both required. Typing the group name stops the confused
+        // relative who clicked "that's me" without understanding what they had
+        // inherited; the soft delete on the server means even a determined
+        // mistake is recoverable for 30 days.
+        // ---------------------------------------------------------------
+        function showResetConfirm() {
+            const nameEl = document.getElementById('resetConfirmGroupName');
+            if (nameEl) nameEl.textContent = groupData.groupName || '';
+
+            const input = document.getElementById('resetConfirmInput');
+            if (input) input.value = '';
+
+            updateResetConfirmState();
+            showModal('resetConfirmModal');
+        }
+
+        function updateResetConfirmState() {
+            const input = document.getElementById('resetConfirmInput');
+            const button = document.getElementById('resetConfirmButton');
+            if (!input || !button) return;
+
+            const typed = input.value.trim();
+            const expected = (groupData.groupName || '').trim();
+            button.disabled = !expected || typed !== expected;
+        }
+
         async function resetGroup() {
-            if (groupData.createdBy !== currentUser) {
-                alert('Only the group creator can reset the group');
+            const input = document.getElementById('resetConfirmInput');
+            const typed = input ? input.value.trim() : '';
+
+            if (!typed || typed !== (groupData.groupName || '').trim()) {
                 return;
             }
 
-            if (confirm('Are you sure you want to reset the entire group? This will delete all data!')) {
-                try {
-                    const response = await fetch(`/api/groups/${groupId}`, {
-                        method: 'DELETE'
-                    });
+            try {
+                const response = await apiFetch(`/api/groups/${groupId}/reset`, { method: 'POST' });
+                const result = await response.json().catch(() => null);
 
-                    if (response.ok) {
-                        window.location.hash = '';
-                        window.location.reload();
-                    }
-                } catch (error) {
-                    alert('Error resetting group');
+                if (response.status === 403) {
+                    hideModal('resetConfirmModal');
+                    showSaveError(result && result.message ? result.message : null);
+                    return;
                 }
+
+                if (!result || !result.success) {
+                    hideModal('resetConfirmModal');
+                    showSaveError(result && result.message ? result.message : null);
+                    return;
+                }
+
+                hideModal('resetConfirmModal');
+                resetState = result.reset;
+                showUndoResetBanner();
+            } catch (error) {
+                console.error('Error resetting group:', error);
+                hideModal('resetConfirmModal');
+                showSaveError('We could not reach the server.');
             }
+        }
+
+        // The person who just reset the group stays on the page, with an undo
+        // that does not time out from under them.
+        function showUndoResetBanner() {
+            const banner = document.getElementById('undoResetBanner');
+            const detail = document.getElementById('undoResetDetail');
+            if (!banner || !resetState) return;
+
+            if (detail) {
+                const until = new Date(resetState.undoAvailableUntil);
+                detail.textContent = isNaN(until)
+                    ? 'You can undo this for the next 30 days.'
+                    : `You can undo this until ${until.toLocaleDateString()}.`;
+            }
+
+            banner.style.display = 'flex';
         }
 
         // Copy Link
@@ -2344,6 +3998,21 @@
             saveErrorTimer = setTimeout(hideSaveError, 12000);
         }
 
+        // A conflict is not a failure to save -- somebody else simply got there
+        // first, and the honest thing to say is what changed. Same toast, own
+        // wording, so it does not read like an error the user caused.
+        function showActionNotice(message) {
+            const toast = document.getElementById('saveErrorToast');
+            const text = document.getElementById('saveErrorToastText');
+            if (!toast || !text) return;
+
+            text.textContent = message;
+            toast.classList.add('show');
+
+            if (saveErrorTimer) clearTimeout(saveErrorTimer);
+            saveErrorTimer = setTimeout(hideSaveError, 12000);
+        }
+
         function hideSaveError() {
             const toast = document.getElementById('saveErrorToast');
             if (toast) toast.classList.remove('show');
@@ -2353,19 +4022,37 @@
             }
         }
 
-        // Save Data
+        // Save Data -- the whole-blob write.
+        //
+        // Only creating a group goes through here now. Every edit has its own
+        // endpoint (brief 7.2), which is what stops two people's changes from
+        // overwriting each other. The server still accepts a blob for an
+        // existing group, for the sake of any tab left open from an older
+        // version, but it takes claim state, settings and other people's items
+        // from storage rather than from the blob.
+        //
         // Returns true if the server accepted the write, false otherwise.
         // Callers may ignore the result; a failure is always surfaced to the
         // user by showSaveError() regardless.
         async function saveData() {
             try {
-                const response = await fetch(`/api/groups/${groupId}`, {
+                const response = await apiFetch(`/api/groups/${groupId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(groupData)
                 });
+
+                // The group was reset out from under this tab.
+                if (response.status === 409) {
+                    const body = await response.json().catch(() => null);
+                    if (body && body.reset) {
+                        resetState = body.reset;
+                        showResetScreen();
+                        return false;
+                    }
+                }
 
                 let result = null;
                 try {

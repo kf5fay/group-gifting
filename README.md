@@ -14,20 +14,23 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
 - 🎁 **Gift Management** - Add items to your wishlist with easy-to-use X button to delete
 - 👥 **Multiple Users** - Everyone in the group can join and manage their lists
 - ⚡ **Live Updates** - Changes appear automatically every 10 seconds without refreshing
-- 🔒 **Creator Controls** - Only the group creator can reset all data, edit any item, or remove users
+- 🔒 **Creator Controls** - Only the group creator can reset the group or remove users, enforced by the server against their device token
+- 📱 **Multiple Devices** - Use the same list on your phone and your computer; no password to type
 
 ### Gift Coordination Features
-- ✅ **Claim Gifts** - Click to claim a gift you'll purchase
+- ✅ **Claim Gifts** - Click to claim a gift you'll purchase. If two people claim at the same moment the server picks one and tells the other, so nobody buys the same present twice
 - ↩️ **Unclaim** - Change your mind? Unclaim anytime
 - 🤝 **Gift Splitting** - Click a claimed gift to split the cost with someone
 - 💰 **Price Ranges** - Add suggested price ranges (Under $25, $25-$50, $50-$100, Over $100)
 - ⭐ **Priority Levels** - Mark items as High, Medium, or Low priority
 - 📝 **Details & Links** - Add notes like size, color, links (automatically clickable!), or preferences
 - ✓ **Mark as Purchased** - Track when gifts have been bought
+- 💌 **Who Do I Thank?** - After the event date, find out who bought which of your gifts
 - ❓ **Ask for More Info (Anonymous)** - Vague item on someone's list? Ask them to add details without revealing you asked. The owner sees a reminder banner and a badge on that item; nobody — including the owner — can see who asked. The reminder stays until they actually update the item, and the "×" only hides the banner for 24 hours (a new request from someone else brings it back).
 
 ### The Magic: Gift Surprise Preservation 🎁
-- 🎁 **Recipients Can't See Claims** - When viewing YOUR OWN wishlist, you can't see:
+- 🎁 **Recipients Can't See Claims** - Claim data on your own items is removed by the
+  server before the page ever receives it, so on YOUR OWN wishlist there is nothing to see:
   - Who claimed your items
   - That your items were claimed at all
   - Purchase status
@@ -37,12 +40,17 @@ A festive web app for organizing gift exchanges with family and friends. Each gr
   - Purchase status
   - Split gift participants
   - Full coordination info
+- 🔎 **Enforced server-side** - The filtering happens per viewer, in the API response.
+  Opening the API URL directly, or reading the page source, shows a recipient no more
+  than the app does.
+- 💌 **Except afterwards** - Once the event date has passed, "Who Do I Thank?" tells you
+  who bought what for you. That reveal is date-gated on the server too.
 - **Result**: Perfect gift coordination without spoiling the surprise!
 
 ### Group Management (Creator Only)
 - ✏️ **Edit Any Item** - Fix typos or update details on anyone's wishlist
 - 👤 **Remove Users** - Delete accidentally added users (misspelled names, test accounts, etc.)
-- 🗑️ **Reset Group** - Complete group reset when needed
+- 🗑️ **Reset Group** - Clears the group for everyone. Needs the group's name typed to confirm, and can be undone for 30 days
 
 ### Design & UX
 - 📊 **Visual Indicators** - Clear badges for priority, price, claimed status, and split gifts
@@ -78,6 +86,10 @@ The observer mode is a powerful feature that lets you debug user issues without 
 3. A red banner will appear at the top indicating "ADMIN OBSERVER MODE - Read Only"
 4. You can see all wishlists, claims, and purchases without your name appearing in the user list
 5. All input fields and action buttons are disabled - no data can be modified
+
+Observer mode reads `/admin/api/groups/:groupId`, which is unfiltered, rather than the public
+endpoint, which is not. It therefore needs a live admin session: open it from the dashboard's
+"👁️ View" button rather than by typing the `?admin=true` URL yourself.
 
 ### Security
 - Sessions expire after 2 hours of inactivity
@@ -178,26 +190,84 @@ npm start
 
 ### Splitting a Gift
 1. See a gift that's already claimed by someone else?
-2. Click "Split Gift" to go in together
-3. Both of you will be listed as claimers
-4. Perfect for expensive items!
+2. Click "🤝 Ask to Split"
+3. Whoever claimed it sees your request on their next poll and answers yes or no
+4. If they say yes, you're both listed as claimers
+
+You can't simply join someone else's claim any more — they have to agree. A decline
+is shown to you once and then dismissed, so you are never left waiting on an answer
+that already came. You may ask twice about the same gift; after a second decline that
+is the end of it. Pending requests lapse after 30 days, or as soon as the gift is
+unclaimed or marked bought. The gift's own recipient sees none of it.
 
 ### Group Creator Powers
 As the group creator, you have special abilities:
 - **Edit Any Item**: Fix typos or update details on anyone's wishlist with the ✏️ Edit button
-- **Remove Users**: Delete accidentally added users with the "Remove User" button
-- **Reset Group**: Nuclear option - delete all data and start fresh
+- **Remove Users**: Delete accidentally added users with the "Remove User" button, after a
+  confirmation naming the person and how many items they have
+- **Reset Group**: Clears the group for everyone. You have to type the group's name to
+  confirm, and it is a **soft delete** — for 30 days the group shows a "this group was
+  reset" screen with an undo, and the creator can restore everything. After 30 days the
+  cleanup job deletes it for good.
+
+Creator actions are enforced by the server against your device token, not by the browser
+hiding buttons. See **Member identity** below.
+
+### Who Do I Thank?
+Once the event date has passed, a "Who Do I Thank?" button appears on your own list and
+tells you who bought which of your gifts. Before that date the server will not answer the
+question at all — the surprise is not something the page merely declines to render.
 
 ### Viewing the App
 - **Your Own Wishlist**: Clean view - no claim status (keeps the surprise!)
 - **Others' Wishlists**: Full coordination info - see who claimed what, purchases, splits
 
+The clean view is produced by the server, not the page. Claim data on your own items is
+stripped from the API response before it is sent to you, so opening the API URL directly
+tells a recipient nothing.
+
 ## 🛠️ Technical Details
+
+### Member identity
+There are still no accounts, no passwords, no email and nothing for a user to remember.
+The server nevertheless needs to know who is asking, so that it can hide your own claim
+data from you and tell two people called John apart.
+
+- When you claim a name in a group, the server issues a **random 32-byte device token**,
+  returns it once, and stores only its SHA-256 hash in `group_members`. The browser keeps
+  it in `localStorage` under `memberToken_<groupId>`.
+- The token is sent on every authenticated request in an `X-Member-Token` header. Never in
+  a query string, where it would end up in access logs and `Referer` headers.
+- One member may hold **up to 5 device tokens**. A sixth evicts the least recently seen.
+- Joining under a name that already exists asks "is this you on another device, or a
+  different person with the same name?" and shows that person's item **count** and join
+  date — never their item names.
+- The member list shows how many devices each person has, and says so when a new one
+  appears. Since identity is claimed rather than proven, that visibility is the check.
+
+**Identity here is claimed on trust, not proven.** Anyone who has the group link was
+invited by someone, and the group polices itself socially. So there are deliberately
+**no PINs, no approval flows, no recovery codes and no lockout recovery** — there is
+nothing to recover from, because nobody can be locked out, and every one of those
+mechanisms would cost the product its main selling point. Impersonation also gains an
+attacker nothing: claiming Mary's name shows you *Mary's* filtered view, which hides the
+claims on Mary's items.
+
+The one place trust is not enough is destructive creator actions, which is why Reset is a
+soft delete with a 30-day undo and a typed confirmation.
+
+**Legacy groups.** A group created before device tokens existed has a `createdBy` name
+with no member row behind it. Creator authority falls back to that name check, but only
+while the creator holds no device — and that is re-evaluated on every request, never
+cached per group, so a group whose creator never returns stays usable.
 
 ### Data Storage
 - Uses **PostgreSQL database** for reliable, scalable data storage
-- Each group has a unique ID in the URL (hash fragment)
-- Users are remembered in browser localStorage for convenience
+- Each group has a unique ID in the URL (hash fragment), a `crypto.randomUUID()`
+- The browser remembers your name and this group's device token in localStorage
+- Every item carries a stable `id`. Actions address items by that id, never by their
+  position in the array, which moves whenever anyone adds or deletes something. A startup
+  migration backfills ids on groups written before ids existed.
 - Data structure:
 ```javascript
 {
@@ -209,11 +279,14 @@ As the group creator, you have special abilities:
     "John": {
       items: [
         {
+          // claimedBy / purchased / splitWith are removed from this item before
+          // it is sent to John himself. Everyone else receives them.
           description: "Blue sweater",
           priority: "high",
           price: "$25-$50",
           details: "Size L, prefer wool, https://amazon.com/...",
           notes: "Found at Target",
+          id: "3f2b...",              // stable; how the action endpoints address it
           claimedBy: ["Mary", "Bob"], // Array for split gifts
           purchased: false,
           splitWith: ["Bob"]
@@ -224,6 +297,29 @@ As the group creator, you have special abilities:
 }
 ```
 
+### How writes work
+Claim, unclaim and mark-purchased each go to their own endpoint, which reads, modifies and
+writes the group inside a single transaction with the row locked. If two people claim the
+same gift at the same moment, one succeeds and the other gets a `409` with the current
+state and a message saying so — the server decides, not whichever browser saves last.
+
+Adding, editing and deleting items, asking for more detail, splitting, changing settings
+and removing a member each work the same way, through their own endpoint. Two people
+adding items to different lists at the same moment both land.
+
+Authorization lives in those handlers, which is the point of having them: the whole-blob
+write could only ever gate its most destructive shapes, so until they existed any member
+could rename the group or rewrite somebody else's item.
+
+Creating a group is the only thing the client still sends a whole blob for. The server
+keeps accepting one for an existing group, so a tab left open from an older version does
+not simply fail — but it is not trusted with anything: claim state, split requests, group
+settings and other people's items are all taken from storage, and such a write may only
+change what its author is allowed to change. A stale snapshot can no longer undo a claim
+made since that tab last polled.
+
+`groups.version` increments on every write and is returned by `GET /api/groups/:groupId`.
+
 ### Database Schema
 ```sql
 -- Groups table
@@ -231,8 +327,25 @@ CREATE TABLE groups (
   group_id VARCHAR(255) PRIMARY KEY,
   data JSONB NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  version    INTEGER NOT NULL DEFAULT 1,  -- bumped on every write
+  deleted_at TIMESTAMP NULL               -- set by Reset; 30-day undo window
 );
+
+-- Member devices. Token hashes live here and ONLY here: groups.data is served
+-- to every member on every poll, so anything stored in it is public to the group.
+CREATE TABLE group_members (
+  id            SERIAL PRIMARY KEY,
+  group_id      VARCHAR(255) NOT NULL REFERENCES groups(group_id) ON DELETE CASCADE,
+  member_name   VARCHAR(100) NOT NULL,
+  token_hash    CHAR(64) NOT NULL,        -- SHA-256 of the device token
+  is_creator    BOOLEAN NOT NULL DEFAULT FALSE,
+  device_label  VARCHAR(100),             -- "Chrome on Windows"; never the raw User-Agent
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX group_members_token_hash_key ON group_members (token_hash);
+CREATE INDEX group_members_group_name_idx ON group_members (group_id, member_name);
 
 -- Contact submissions table (for admin dashboard)
 CREATE TABLE contact_submissions (
@@ -256,18 +369,59 @@ https://comegiftit.com/#abc123xyz
 ### API Endpoints
 
 **Public Endpoints:**
-- `GET /api/groups/:groupId` - Retrieve group data
-- `POST /api/groups/:groupId` - Create or update group data
-- `DELETE /api/groups/:groupId` - Delete group data (reset)
-- `POST /api/contact` - Submit contact form
-- `GET /api/health` - Health check endpoint
+
+Reads and writes:
+- `GET /api/groups/:groupId` — with a member token, the group with claim data stripped from
+  the caller's own items, plus `viewer` and `version`. Without one, **metadata only**:
+  group name, holiday, event date and member names. No wishlists, no items, no claims.
+- `POST /api/groups/:groupId` — create a group, or update one (member token required).
+  Still whole-blob; see **How writes work**.
+- `POST /api/groups/:groupId/join` — claim a name and receive a device token. Answers
+  `name_taken` with an item count and join date when the name is already in use.
+- `GET /api/groups/:groupId/members` — member list and device counts. Device labels and
+  timestamps are returned to members only.
+- `GET /api/groups/:groupId/thank-you` — who bought your gifts. Only answers about the
+  caller's own list, and only once the event date has passed.
+
+Item actions — transactional, addressed by stable item id:
+- `POST /api/groups/:groupId/items` — add an item to your own list
+- `PATCH /api/groups/:groupId/items/:itemId` — edit (your own item, or any if you are the creator)
+- `DELETE /api/groups/:groupId/items/:itemId` — delete (same rule)
+- `POST /api/groups/:groupId/items/:itemId/claim` — `409` if someone else holds it
+- `POST /api/groups/:groupId/items/:itemId/unclaim`
+- `POST /api/groups/:groupId/items/:itemId/purchase` — body `{ purchased }`, or toggles
+- `POST /api/groups/:groupId/items/:itemId/info-request` — anonymous; stores no asker
+- `POST /api/groups/:groupId/items/:itemId/split-request` — ask to go in on a claim
+- `POST /api/groups/:groupId/split-requests/:requestId/respond` — body `{ accept }`, claimer only
+- `POST /api/groups/:groupId/split-requests/:requestId/dismiss` — asker acknowledges a decline
+
+Creator only:
+- `PATCH /api/groups/:groupId/settings` — group name, event type, event date
+- `DELETE /api/groups/:groupId/members/:name` — remove a member, their list and their claims
+
+Group lifecycle:
+- `POST /api/groups/:groupId/reset` — creator only; soft delete
+- `POST /api/groups/:groupId/undo-reset` — creator only; within 30 days
+- `DELETE /api/groups/:groupId` — same as reset, kept for older clients
+
+Other:
+- `POST /api/contact` — submit contact form
+- `GET /api/health` — health check endpoint
+
+Member tokens travel in an `X-Member-Token` header, never in a query string. Group
+responses are sent `Cache-Control: private, no-store` and `Vary: X-Member-Token`, because
+the same URL returns a different body to each viewer and a shared cache must never reuse
+one member's for another.
+
+Not built, deliberately: optimistic locking on the whole-blob write (remediation brief
+7.3). Every path the client uses is granular now, so there is no blob write left to lock.
 
 **Admin Endpoints (require authentication):**
 - `POST /admin/api/login` - Admin login
 - `POST /admin/api/logout` - Admin logout
 - `GET /admin/api/stats` - Get system statistics
 - `GET /admin/api/groups` - List all groups (with search)
-- `GET /admin/api/groups/:groupId` - Get specific group data
+- `GET /admin/api/groups/:groupId` - Get specific group data, unfiltered (powers Observer Mode)
 - `DELETE /admin/api/groups/:groupId` - Delete group
 - `GET /admin/api/contacts` - List contact submissions
 - `PUT /admin/api/contacts/:id` - Update contact status
@@ -275,21 +429,29 @@ https://comegiftit.com/#abc123xyz
 - `GET /admin` - Admin dashboard page
 
 ### Rate Limiting
-- **Read operations** (GET): 100 requests/minute
-- **Write operations** (POST/DELETE): 30 requests/minute
-- **Group creation**: 10 groups/hour
+Limits are keyed on the **member token** where one is present, falling back to IP. A whole
+household shares one public IP, so per-IP limits alone would have throttled a family on
+Christmas morning. Identified members also get a higher ceiling, since they are a known
+participant in one group rather than an anonymous source.
+
+- **Read operations** (GET): 200/minute with a token, 100/minute without
+- **Write operations** (POST/DELETE): 120/minute with a token, 30/minute without
+- **Group creation**: 10 groups/hour (per IP)
 - **Contact form**: 3 submissions/hour
 - **Admin login**: 3 attempts/15 minutes
 - **General limit**: 1000 requests/15 minutes
-- **Polling**: Updates every 10 seconds
+- **Polling**: Updates every 10 seconds. There is no ETag / 304 handling and no
+  hidden-tab backoff — a background tab polls at the same rate as a visible one.
 
 ### Security Features
 - Helmet.js for security headers, including a Content Security Policy
 - Input validation and length limits on all stored fields
 - Output escaping at render time (stored text is never trusted as HTML)
 - Parameterised SQL queries
-- Rate limiting on all endpoints
-- No accounts or passwords
+- Rate limiting on all endpoints, keyed on member token where available
+- No accounts or passwords; per-device tokens stored only as SHA-256 hashes
+- Claim data filtered per viewer server-side, so a recipient cannot read it from the API
+- An unidentified caller cannot read wishlists or overwrite an existing group
 - Static files served only from `public/`
 
 Known limitation: anyone holding a group's link can open that group. Share
