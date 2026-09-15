@@ -191,9 +191,51 @@ No legal boilerplate. Write it the way the About modal is written.
 
 ---
 
-## 8. Design constraints
+## 8. Mobile
 
-- Mobile-first. Check 375px before anything else, and confirm no horizontal scroll at 320px.
+**Assume the majority of visitors are on a phone.** The link arrives by text message. Desktop is the minority case and should be treated as the adaptation, not the baseline.
+
+### 8.1 What fits on the first screen
+
+On a 375×667 viewport the headline, sub-line and create form already exceed one screen. A mobile visitor sees the promise and the top of the form and nothing else.
+
+That is acceptable — the form is the priority — but it must be deliberate:
+
+- Headline, sub-line, and the **first form field** must all be visible without scrolling at 375×667. Tune the type scale and spacing until that is true.
+- The page must not *look finished* at the fold. Leave a visible edge of the next element so it is obvious there is more below. No scroll-prompt arrows or animation; just don't end the viewport on clean whitespace.
+- Do not add a mobile-only pitch block above the form. The headline and sub-line are the pitch.
+
+### 8.2 Form inputs — specific bugs to avoid
+
+- **All form inputs need `font-size: 16px` or larger.** Below 16px, iOS Safari zooms the viewport on focus and frequently does not zoom back out. This is the single most common mobile form bug and it makes the app feel broken on the first interaction.
+- **Do not use `100vh`** for the hero or any full-height element. Mobile browser chrome makes it wrong and causes content to sit under the address bar. Use `100dvh` with a `min-height` fallback, or avoid viewport-height units.
+- **The Create button must be reachable with the keyboard open.** When the group-name field is focused, the on-screen keyboard takes roughly 40% of the screen. Check that submitting does not require dismissing the keyboard first.
+- Mark the event date as **optional** in its label. It is an optional field in a three-field form, and on mobile every field feels like work.
+- Set appropriate `inputmode` and `autocomplete` attributes so the right keyboard appears.
+
+### 8.3 Touch and layout
+
+- Minimum tap target **44×44px** for every button and link, including footer links. The footer currently packs several links onto one line — check the spacing between them.
+- The hero screenshot is portrait, so **cap its height on mobile** (roughly 50vh) or it will consume an entire screen on its own.
+- Body copy blocks: comfortable line length, generous line height. Blocks 3 and 5 are prose and need to be readable one-handed.
+- **Check the fixed donation banner against notched devices.** If anything is fixed-positioned, it needs `env(safe-area-inset-top)` or it will sit under the notch or the home indicator.
+- No horizontal scroll at 320px. Test by setting `overflow-x: hidden` off and looking, not by hiding the symptom.
+
+### 8.4 Performance
+
+- **Budget: no more than 50KB added to the HTML/CSS/JS payload**, excluding images. Report the actual figure.
+- Hero screenshot: target under 100KB for the WebP.
+- No iframe, no font file, and no third-party request before interaction.
+- Test on a throttled connection (Fast 3G in devtools at minimum), not on office wifi.
+
+### 8.5 Testing
+
+Devtools device emulation does not catch the input-zoom bug, the `100vh` bug, or keyboard overlap. **Verify on a real iPhone and a real Android device** before calling this done. If that is not possible, say so explicitly rather than reporting it as tested.
+
+---
+
+## 9. Design constraints
+
 - Use the existing colour variables and type scale. This should look like the same product, not a separate marketing site.
 - Heading hierarchy: one `<h1>` (the hero headline), `<h2>` for each block. The current `<h1>` is the logo lockup — demote it.
 - No new fonts, no CSS framework, no JS libraries.
@@ -202,7 +244,7 @@ No legal boilerplate. Write it the way the About modal is written.
 
 ---
 
-## 9. Acceptance criteria
+## 10. Acceptance criteria
 
 - [ ] Opening `comegiftit.com` with no hash shows the new landing page
 - [ ] Opening a valid group URL with a hash goes straight to the join screen with **no flash** of landing content
@@ -210,14 +252,20 @@ No legal boilerplate. Write it the way the About modal is written.
 - [ ] Headline reads "Christmas without…" when the local date is 1 Nov–26 Dec, and "Group gifting without…" otherwise (test by faking the clock, not by waiting)
 - [ ] No iframe request is made until the play button is clicked
 - [ ] No horizontal scroll at 320px, 375px, or 768px
+- [ ] Headline, sub-line and the first form field are all visible at 375×667 without scrolling
+- [ ] Focusing a form input on iOS Safari does not zoom the viewport
+- [ ] The Create button is reachable with the on-screen keyboard open
+- [ ] Every button and link meets a 44×44px tap target, footer links included
+- [ ] Nothing sits under the notch or home indicator on a notched device
+- [ ] Verified on a real iPhone and a real Android device, or explicitly reported as not verified
 - [ ] Hero screenshot causes no cumulative layout shift
 - [ ] Privacy modal opens from the footer and closes like the other modals
 - [ ] "Join an Existing Group" panel is gone
-- [ ] Page weight added over the previous version is reported to me, in KB
+- [ ] Added payload is under 50KB excluding images, and the actual figure is reported
 
 ---
 
-## 10. Out of scope
+## 11. Out of scope
 
 Do not touch:
 

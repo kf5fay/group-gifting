@@ -77,7 +77,8 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%);
-            min-height: 100vh;
+            min-height: 100vh;  /* fallback */
+            min-height: 100dvh; /* mobile chrome makes 100vh overshoot */
             padding: 0;
             color: #333;
             position: relative;
@@ -139,6 +140,9 @@
             transition: all 0.3s ease;
             width: auto;
             margin: 0;
+            /* 44x44 minimum tap target (brief 8.3). */
+            min-width: 44px;
+            min-height: 44px;
         }
 
         .donation-banner button:hover {
@@ -190,7 +194,9 @@
             padding: 12px;
             border: 2px solid #e0e0e0;
             border-radius: 10px;
-            font-size: 14px;
+            /* 16px is the floor: below it iOS Safari zooms the viewport on
+               focus and frequently never zooms back out. Do not lower this. */
+            font-size: 16px;
             transition: border-color 0.3s;
         }
 
@@ -576,10 +582,30 @@
             transform: scale(1.1);
         }
 
+        /* 44x44 tap target without resizing the visible circle (brief 8.3).
+           flex-shrink is pinned because the header is a flex row and was
+           squeezing the button to 25px next to a long heading. */
+        .close-btn {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .close-btn::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44px;
+            height: 44px;
+            transform: translate(-50%, -50%);
+        }
+
         /* Footer */
         .footer {
             background: rgba(255,255,255,0.95);
             padding: 30px 20px;
+            /* Keep the last line clear of the home indicator (brief 8.3). */
+            padding-bottom: calc(30px + env(safe-area-inset-bottom, 0px));
             text-align: center;
             margin-top: 20px;
             color: #666;
@@ -588,7 +614,9 @@
         .footer-links {
             display: flex;
             justify-content: center;
-            gap: 20px;
+            /* Was 20px. The links now carry their own padding to reach a
+               44px tap target, which supplies the separation instead. */
+            gap: 6px;
             margin-bottom: 15px;
             flex-wrap: wrap;
         }
@@ -598,6 +626,13 @@
             text-decoration: none;
             font-size: 14px;
             cursor: pointer;
+            /* 44x44 minimum tap target (brief 8.3). */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 44px;
+            min-height: 44px;
+            padding: 0 6px;
         }
 
         .footer-links a:hover {
@@ -753,6 +788,8 @@
             position: fixed;
             left: 50%;
             bottom: 20px;
+            /* Clear the home indicator on notched devices (brief 8.3). */
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
             transform: translateX(-50%);
             z-index: 2000;
             max-width: 90vw;
@@ -1071,6 +1108,64 @@
             }
         }
 
+        /* Inline text link. The vertical padding is a 44px tap target
+           (brief 8.3); on an inline element it grows the hit area without
+           changing the line box, so the surrounding prose does not reflow. */
+        .inline-link {
+            color: var(--primary-color);
+            cursor: pointer;
+            text-decoration: underline;
+            padding: 14px 4px;
+        }
+
+        /* --- Mobile is the baseline case (brief section 8). Desktop is the
+               adaptation above; this block tunes the phone view. --- */
+        @media (max-width: 899px) {
+            /* 8.1 Spacing is tuned so that at 375x667 the headline, sub-line,
+               the whole form AND the Create button clear the fold, leaving
+               the reassurance line straddling it -- which is what signals
+               there is more page below without a scroll arrow. */
+            .landing-brand {
+                margin-bottom: 18px;
+            }
+
+            .hero-headline {
+                margin-bottom: 10px;
+            }
+
+            .hero-sub {
+                margin-bottom: 18px;
+            }
+
+            /* Scoped to the hero so the wishlist and modal forms elsewhere
+               in the app keep their own rhythm. */
+            .hero-copy .input-group {
+                /* 11px, not 14: the three saved pixels per field are what
+                   push the reassurance line back up across the 667 fold so
+                   a strip of it stays visible. */
+                margin-bottom: 11px;
+            }
+
+            /* 8.3 The screenshot is portrait, so left uncapped it eats most
+               of a phone screen on its own. Width and height stay auto so
+               the intrinsic 720x1280 ratio still drives the reserved box. */
+            .hero-shot img {
+                width: auto;
+                height: auto;
+                max-width: 100%;
+                max-height: 50vh;  /* fallback */
+                max-height: 50dvh;
+                margin: 0 auto;
+            }
+
+            /* 8.3 Reclaim horizontal room for the prose in block 3 -- at
+               375px the tinted panel's padding was squeezing it to roughly
+               28 characters a line. */
+            .surprise {
+                padding: 26px 18px;
+            }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .video-play,
             .video-play:hover:not(:disabled) {
@@ -1134,7 +1229,13 @@
 
                     <div class="input-group">
                         <label for="groupNameInput">Create a New Group</label>
-                        <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100">
+                        <!-- autocomplete off: a group name is not a stored
+                             credential or address, so browser autofill only
+                             offers noise. autocapitalize/enterkeyhint make
+                             the phone keyboard behave (brief 8.2). -->
+                        <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100"
+                               inputmode="text" autocomplete="off" autocapitalize="words"
+                               spellcheck="false" enterkeyhint="done">
                     </div>
 
                     <div class="input-group">
@@ -1524,7 +1625,7 @@
 
             <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">Deleting something sooner</h3>
             <p style="line-height: 1.6; color: #555;">
-                Ask us. Use the <a onclick="hideModal('privacyModal'); showModal('contactModal');" style="color: var(--primary-color); cursor: pointer; text-decoration: underline;">contact form</a>, tell us which group you mean, and we will remove it.
+                Ask us. Use the <a onclick="hideModal('privacyModal'); showModal('contactModal');" class="inline-link">contact form</a>, tell us which group you mean, and we will remove it.
             </p>
 
             <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
