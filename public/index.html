@@ -28,6 +28,39 @@
          placeholders. Replace them with real artwork before launch. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+    <!-- Landing page bootstrap. Runs in the head, before any body content is
+         parsed, so both decisions below are settled before first paint.
+
+         1. Routing guard. This file is the landing page AND the whole app.
+            Someone opening /#<groupId> must never see marketing copy flash
+            before the DOMContentLoaded router runs. The class is set here and
+            the landing is hidden by CSS, so it simply never paints.
+
+         2. The seasonal headline lives here, as the single source of that
+            text, so the inline script beside the <h1> can fill it in during
+            parsing rather than swapping it visibly after load. -->
+    <script>
+        (function () {
+            if (window.location.hash.length > 1) {
+                document.documentElement.className += ' hash-route';
+            }
+        })();
+
+        // 1 November - 26 December inclusive, in the visitor's local time.
+        // Takes an optional Date so the switch can be tested with a faked
+        // clock instead of waiting for the calendar.
+        function heroHeadline(now) {
+            var d = now || new Date();
+            var month = d.getMonth();
+            var day = d.getDate();
+            var festive = (month === 10) || (month === 11 && day <= 26);
+
+            return festive
+                ? 'Christmas without three people buying the same gift.'
+                : 'Group gifting without three people buying the same gift.';
+        }
+    </script>
     <style>
         * {
             margin: 0;
@@ -763,6 +796,289 @@
             box-shadow: none;
         }
 
+        /* ============================================================
+           Landing page (the marketing surface at /).
+           Layout and copy only -- no app logic hangs off any of this.
+           Written mobile-first: the base rules are the 375px view and the
+           900px breakpoint is the only widening step.
+           ============================================================ */
+
+        /* Set by the head script when the URL carries a group hash. Hiding
+           the landing in CSS rather than JS is what keeps it from painting
+           before the router runs. */
+        html.hash-route #welcomeScreen {
+            display: none !important;
+        }
+
+        /* The logo lockup, demoted from <h1> so the hero headline can take it.
+           Keeps #headerEmoji / #headerEmoji2 for applyTheme(). */
+        .landing-brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 26px;
+        }
+
+        .hero {
+            display: grid;
+            gap: 30px;
+        }
+
+        .hero-headline {
+            font-size: 26px;
+            line-height: 1.25;
+            text-align: left;
+            color: var(--primary-color);
+            margin-bottom: 14px;
+        }
+
+        .hero-sub {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #555;
+            margin-bottom: 26px;
+        }
+
+        .hero-reassure {
+            margin: 14px 0 0;
+            text-align: center;
+            font-size: 14px;
+            color: #6a6a6a;
+        }
+
+        /* Explicit width/height on the image plus this ratio box means the
+           space is reserved at parse time -- no layout shift when it paints. */
+        .hero-shot {
+            margin: 0;
+            justify-self: center;
+            width: 100%;
+            max-width: 320px;
+        }
+
+        .hero-shot img {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            border-radius: 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+        }
+
+        /* --- Shared block furniture --- */
+        .landing-block {
+            margin-top: 40px;
+            padding-top: 34px;
+            border-top: 2px solid #eceef1;
+        }
+
+        .landing-block h2 {
+            font-size: 21px;
+            line-height: 1.3;
+            color: var(--primary-color);
+            margin-bottom: 16px;
+        }
+
+        .landing-block p {
+            font-size: 15px;
+            line-height: 1.65;
+            color: #555;
+        }
+
+        .landing-block p + p {
+            margin-top: 14px;
+        }
+
+        /* For headings that exist for hierarchy but have no visible copy in
+           the brief. Standard clip pattern -- still read out, never seen. */
+        .visually-hidden {
+            position: absolute !important;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* --- Block 2: three steps --- */
+        .steps {
+            display: grid;
+            gap: 22px;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .steps h3 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .steps p {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #555;
+        }
+
+        /* --- Block 3: the surprise. Carries more weight than blocks 2 and 5
+           by sitting in a tinted panel rather than on the flat card. --- */
+        .surprise {
+            margin-top: 40px;
+            padding: 30px 24px;
+            border-radius: 16px;
+            /* Tinted from the live theme colour, so the panel follows the
+               Event Type dropdown instead of staying Christmas pink.
+               Flat fallbacks first for anything without color-mix(). */
+            background: #faf7f8;
+            background: color-mix(in srgb, var(--primary-color) 6%, #ffffff);
+            border: 2px solid #ebe5e7;
+            border-color: color-mix(in srgb, var(--primary-color) 18%, #ffffff);
+        }
+
+        .surprise h2 {
+            font-size: 24px;
+            line-height: 1.3;
+            color: var(--primary-color);
+            margin-bottom: 18px;
+        }
+
+        .surprise p {
+            font-size: 16px;
+            line-height: 1.7;
+            color: #4a4a4a;
+        }
+
+        .surprise p + p {
+            margin-top: 16px;
+        }
+
+        /* --- Block 4: video facade. No iframe exists until the button is
+           clicked; until then this is one lazily-loaded poster image. --- */
+        .video-facade {
+            position: relative;
+            /* Capped so a 16:9 box does not swallow the page on a wide card. */
+            max-width: 720px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #eceef1;
+            aspect-ratio: 16 / 9;
+        }
+
+        .video-facade img,
+        .video-facade iframe {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            object-fit: cover;
+        }
+
+        .video-play {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 74px !important;
+            height: 74px;
+            padding: 0;
+            margin: 0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            line-height: 1;
+            transition: transform 0.2s, box-shadow 0.3s;
+        }
+
+        .video-play:hover:not(:disabled) {
+            transform: translate(-50%, -50%) scale(1.08);
+        }
+
+        .video-play:active:not(:disabled) {
+            transform: translate(-50%, -50%);
+        }
+
+        .video-play:focus-visible {
+            outline: 3px solid #fff;
+            outline-offset: 3px;
+        }
+
+        .video-caption {
+            margin-top: 12px;
+            text-align: center;
+            font-size: 14px;
+            color: #6a6a6a;
+        }
+
+        .video-pending {
+            margin-top: 6px;
+            text-align: center;
+            font-size: 13px;
+            color: #6a6a6a; /* 5.41:1 on white -- #8a8a8a missed AA at 3.45:1 */
+            font-style: italic;
+        }
+
+        /* --- The line replacing the old "Join an Existing Group" panel --- */
+        .landing-note {
+            margin-top: 40px;
+            padding-top: 26px;
+            border-top: 2px solid #eceef1;
+            text-align: center;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #6a6a6a;
+        }
+
+        @media (min-width: 900px) {
+            /* Form left, screenshot right. .hero-copy holds the headline,
+               sub-line, form and reassurance line, so the form stays ahead
+               of the screenshot in both DOM and tab order at every width. */
+            .hero {
+                grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+                gap: 46px;
+                align-items: center;
+            }
+
+            .hero-headline {
+                font-size: 34px;
+            }
+
+            .hero-sub {
+                font-size: 17px;
+            }
+
+            .hero-shot {
+                max-width: 340px;
+            }
+
+            .steps {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 30px;
+            }
+
+            .surprise {
+                padding: 36px 34px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .video-play,
+            .video-play:hover:not(:disabled) {
+                transition: none;
+                transform: translate(-50%, -50%);
+            }
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .wishlists-grid {
@@ -795,43 +1111,141 @@
     <div class="container">
         <!-- Welcome Screen -->
         <div id="welcomeScreen" class="card">
-            <h1><span id="headerEmoji">🎄</span> ComeGiftIt <span id="headerEmoji2">🎁</span></h1>
-            <p class="tagline">Holiday gifting without the chaos</p>
-            
-            <div class="input-group">
-                <label for="groupNameInput">Create a New Group</label>
-                <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100">
+            <div class="landing-brand">
+                <span id="headerEmoji">🎄</span> ComeGiftIt <span id="headerEmoji2">🎁</span>
             </div>
 
-            <div class="input-group">
-                <label for="holidaySelect">Event Type</label>
-                <select id="holidaySelect">
-                    <option value="Christmas">Christmas</option>
-                    <option value="Birthday">Birthday</option>
-                    <option value="Hanukkah">Hanukkah</option>
-                    <option value="Anniversary">Anniversary</option>
-                    <option value="Other">Other</option>
-                </select>
-            </div>
+            <!-- Block 1: hero. DOM order is headline, sub-line, form,
+                 reassurance, screenshot. .hero-copy wraps the first four so
+                 the 900px two-column layout never reorders them -- the form
+                 stays first in tab order at every viewport. -->
+            <section class="hero">
+                <div class="hero-copy">
+                    <h1 class="hero-headline" id="heroHeadline"></h1>
+                    <script>
+                        // Filled during parsing, before this element paints,
+                        // so the headline never visibly changes after load.
+                        document.getElementById('heroHeadline').textContent = heroHeadline();
+                    </script>
 
-            <div class="input-group">
-                <label for="eventDate">Event Date (Optional)</label>
-                <input type="date" id="eventDate">
-            </div>
+                    <p class="hero-sub">
+                        Create a group, share one link. Everyone adds a wishlist and claims what they're buying — and the person it's for never sees a thing.
+                    </p>
 
+                    <div class="input-group">
+                        <label for="groupNameInput">Create a New Group</label>
+                        <input type="text" id="groupNameInput" placeholder="e.g., Smith Family Christmas 2025" maxlength="100">
+                    </div>
 
-            <button onclick="createGroup()">Create Group</button>
+                    <div class="input-group">
+                        <label for="holidaySelect">Event Type</label>
+                        <select id="holidaySelect">
+                            <option value="Christmas">Christmas</option>
+                            <option value="Birthday">Birthday</option>
+                            <option value="Hanukkah">Hanukkah</option>
+                            <option value="Anniversary">Anniversary</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
 
-            <div style="text-align: center; margin: 30px 0; color: #999;">
-                <strong>— OR —</strong>
-            </div>
+                    <div class="input-group">
+                        <label for="eventDate">Event Date (Optional)</label>
+                        <input type="date" id="eventDate">
+                    </div>
 
-            <div class="input-group">
-                <label>Join an Existing Group</label>
-                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                    If someone shared a link with you, just paste it in your browser!
+                    <button onclick="createGroup()">Create Group</button>
+
+                    <p class="hero-reassure">Free · No accounts · No ads</p>
+                </div>
+
+                <!-- HERO SCREENSHOT — PLACEHOLDER, asset does not exist yet.
+                     Marked placeholder rather than a broken <img>. To swap in
+                     the real asset: drop hero-shot.webp and hero-shot.png
+                     (720x1280) into public/ and replace this whole <picture>
+                     with:
+
+                       <picture>
+                         <source srcset="/hero-shot.webp" type="image/webp">
+                         <img src="/hero-shot.png"
+                              alt="A ComeGiftIt wishlist seen by another member of the group: three gift ideas with price ranges and priority markers, two of them already showing a claimed badge."
+                              width="720" height="1280" fetchpriority="high">
+                       </picture>
+
+                     Eager by design -- above the fold, so no loading="lazy"
+                     and no fade-in. width/height are set to reserve space. -->
+                <picture class="hero-shot">
+                    <img src="/hero-shot-placeholder.svg"
+                         alt="Placeholder for the hero screenshot: a wishlist viewed by another member of the group, showing claimed badges, price ranges and priority markers."
+                         width="720" height="1280" fetchpriority="high">
+                </picture>
+            </section>
+
+            <!-- Block 2: three steps. The brief gives no visible heading for
+                 this block, so the <h2> that holds the hierarchy together is
+                 screen-reader only rather than invented copy on the page. -->
+            <section class="landing-block">
+                <h2 class="visually-hidden">How it works</h2>
+                <ol class="steps">
+                    <li>
+                        <h3>1. Create your group</h3>
+                        <p>Name it, pick the occasion, and you're done in about ten seconds.</p>
+                    </li>
+                    <li>
+                        <h3>2. Share one link</h3>
+                        <p>Text it, drop it in the group chat, email it. No signups for anyone.</p>
+                    </li>
+                    <li>
+                        <h3>3. Claim what you're buying</h3>
+                        <p>Everyone can see what's already taken — so nobody doubles up.</p>
+                    </li>
+                </ol>
+            </section>
+
+            <!-- Block 3: the differentiator. Carries the most visual weight
+                 of the three lower blocks. -->
+            <section class="surprise">
+                <h2>Your list looks completely normal to you.</h2>
+                <p>
+                    When someone claims a gift on your wishlist, you see nothing. No badge, no strikethrough, no hint that anything happened at all. Everyone else sees the full picture — who claimed what, what's been bought, who's splitting the cost of the expensive thing.
                 </p>
-            </div>
+                <p>
+                    You just get surprised on the day, like you're supposed to.
+                </p>
+            </section>
+
+            <!-- Block 4: video facade. The poster is a plain lazy-loaded
+                 image; the iframe is injected by playVideo() on click and at
+                 no other time. See VIDEO_EMBED_URL in the main script. -->
+            <section class="landing-block">
+                <h2>See it in action</h2>
+                <div class="video-facade" id="videoFacade">
+                    <img src="/video-poster-placeholder.svg"
+                         alt="Placeholder for the video poster frame."
+                         width="1280" height="720" loading="lazy" decoding="async">
+                    <button type="button" class="video-play" id="videoPlayBtn"
+                            onclick="playVideo()"
+                            aria-label="Play the 90 second ComeGiftIt walkthrough video">
+                        <span aria-hidden="true">▶</span>
+                    </button>
+                </div>
+                <p class="video-caption">90 seconds</p>
+                <p class="video-pending" id="videoPending" hidden>Video coming soon.</p>
+            </section>
+
+            <!-- Block 5: the year-round layer. -->
+            <section class="landing-block">
+                <h2>Works for more than Christmas</h2>
+                <p>
+                    Birthdays, anniversaries, Hanukkah, or anything else you're buying for as a group. Pick the occasion when you create the group and the app follows along.
+                </p>
+            </section>
+
+            <!-- Replaces the old "Join an Existing Group" panel, which only
+                 ever pointed people somewhere else and whose audience never
+                 reaches this screen anyway. -->
+            <p class="landing-note">
+                Got a link from someone? Just open it — it takes you straight to your group.
+            </p>
         </div>
 
         <!-- Join Screen -->
@@ -1075,6 +1489,52 @@
     </div>
 
     <!-- Contact Modal -->
+    <!-- Privacy Modal. Expands the short privacy note in the About modal
+         into something a cautious parent can actually read. Same voice and
+         same markup pattern as About and FAQ. -->
+    <div id="privacyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Privacy</h2>
+                <button class="close-btn" onclick="hideModal('privacyModal')">&times;</button>
+            </div>
+            <p style="line-height: 1.6; color: #555;">
+                The short version: we keep as little as possible, we never ask who you are, and nothing here is sold or shared.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">What we store</h3>
+            <p style="line-height: 1.6; color: #555;">
+                The group name, the occasion and date you pick, the names people type when they join, and the wishlist items and details everyone adds — sizes, colours, links, that sort of thing. That is the whole list. If you would not want it on a fridge door, don't put it in a wishlist.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">No accounts, ever</h3>
+            <p style="line-height: 1.6; color: #555;">
+                There is nothing to sign up for. No password, no email address, no phone number, no "continue with" button. You type a first name so the rest of the group knows whose list is whose, and that is the only thing we ever ask you for.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">Anyone with the link can open the group</h3>
+            <p style="line-height: 1.6; color: #555;">
+                The link is the key. That is what makes it easy — nobody has to make an account to join — but it also means anyone you send it to can open the group and see the wishlists inside. Share it with the people you actually want in the group, and treat it the way you would treat the group chat itself.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">How long we keep it</h3>
+            <p style="line-height: 1.6; color: #555;">
+                Groups are kept for two years, then deleted automatically — so last year's list is still there when you want to look something up, and it does not sit around forever. If you write to us through the contact form, we store the name, email address and message you send, and delete those after twelve months.
+            </p>
+
+            <h3 style="color: var(--primary-color); font-size: 16px; margin: 22px 0 8px;">Deleting something sooner</h3>
+            <p style="line-height: 1.6; color: #555;">
+                Ask us. Use the <a onclick="hideModal('privacyModal'); showModal('contactModal');" style="color: var(--primary-color); cursor: pointer; text-decoration: underline;">contact form</a>, tell us which group you mean, and we will remove it.
+            </p>
+
+            <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                <p style="font-size: 14px; color: #666;">
+                    <strong>🔒 No ads and no trackers.</strong> We don't run advertising, we don't sell anything to anyone, and there are no third-party tracking scripts on this page.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <div id="contactModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1203,6 +1663,7 @@
         <div class="footer-links">
             <a onclick="showModal('aboutModal')">About</a>
             <a onclick="showModal('faqModal')">FAQ</a>
+            <a onclick="showModal('privacyModal')">Privacy</a>
             <a onclick="showModal('contactModal')">Contact</a>
             <a href="https://liberapay.com/comegiftit" target="_blank">🌮 Donate</a>
         </div>
@@ -1228,6 +1689,28 @@
         let groupData = null;
         let groupId = null;
         let currentTheme = 'Christmas'; // Track current theme
+
+        // ============================================================
+        // Landing page video (brief section 5)
+        //
+        // The one place a video URL goes. Set it to the provider's *embed*
+        // URL and the block starts working -- nothing else needs changing:
+        //   const VIDEO_EMBED_URL = 'https://www.youtube.com/embed/XXXXXXXXXXX';
+        //
+        // Deliberately a facade, not an embed. A YouTube or Vimeo iframe
+        // drags over a megabyte of JavaScript on load, and this file is also
+        // the app, so every joiner on mobile data would pay for a video most
+        // of them never play. Until the button is clicked there is no iframe
+        // and no third-party request at all.
+        //
+        // HEADS UP: the CSP in server.js currently sets frame-src 'none', so
+        // the iframe is refused the moment it is injected, however valid the
+        // URL. Setting a URL here is necessary but NOT sufficient -- frame-src
+        // has to allow the provider too. That is a server change and so was
+        // out of scope for this pass; it is the one thing still standing
+        // between this block and a working video.
+        // ============================================================
+        const VIDEO_EMBED_URL = '';
         let expandedWishlists = {}; // Track which wishlists are expanded
 
         // ============================================================
@@ -1708,6 +2191,8 @@
                 currentUser = savedUsername;
             }
 
+            initVideoFacade();
+
             // Check if there's a group ID in the URL
             const hash = window.location.hash.substring(1);
             if (hash) {
@@ -1763,11 +2248,51 @@
             document.getElementById('resetStateScreen').classList.add('hidden');
 
             if (screen === 'welcome') {
+                // Clear the head script's guard. Reaching here means we really
+                // are on the landing page, whatever the URL looked like on load.
+                document.documentElement.classList.remove('hash-route');
                 document.getElementById('welcomeScreen').classList.remove('hidden');
             } else if (screen === 'join') {
                 document.getElementById('joinScreen').classList.remove('hidden');
             } else if (screen === 'app') {
                 document.getElementById('appScreen').classList.remove('hidden');
+            }
+        }
+
+        // Landing page video facade. Swaps the poster for the real iframe on
+        // click -- the first and only moment a third-party request happens.
+        function playVideo() {
+            if (!VIDEO_EMBED_URL) return;
+
+            const facade = document.getElementById('videoFacade');
+            if (!facade) return;
+
+            const separator = VIDEO_EMBED_URL.indexOf('?') === -1 ? '?' : '&';
+            const iframe = document.createElement('iframe');
+            iframe.src = VIDEO_EMBED_URL + separator + 'autoplay=1';
+            iframe.title = 'ComeGiftIt walkthrough';
+            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+            iframe.allowFullscreen = true;
+
+            facade.replaceChildren(iframe);
+            iframe.focus();
+        }
+
+        // With no URL set yet, say so plainly rather than offering a button
+        // that does nothing. Both lines disappear on their own once
+        // VIDEO_EMBED_URL is filled in.
+        function initVideoFacade() {
+            if (VIDEO_EMBED_URL) return;
+
+            const button = document.getElementById('videoPlayBtn');
+            const pending = document.getElementById('videoPending');
+
+            if (button) {
+                button.disabled = true;
+                button.setAttribute('aria-label', 'Walkthrough video coming soon');
+            }
+            if (pending) {
+                pending.hidden = false;
             }
         }
 

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1280" width="720" height="1280" role="img" aria-label="Placeholder for the hero screenshot">
+  <rect width="720" height="1280" rx="48" fill="#f4f5f7"/>
+  <rect x="8" y="8" width="704" height="1264" rx="42" fill="none" stroke="#c41e3a" stroke-width="6" stroke-dasharray="24 18"/>
+  <g fill="#c41e3a" font-family="Segoe UI, Tahoma, sans-serif" text-anchor="middle">
+    <text x="360" y="560" font-size="54" font-weight="700">PLACEHOLDER</text>
+    <text x="360" y="628" font-size="36" font-weight="600">Hero screenshot</text>
+  </g>
+  <g fill="#666" font-family="Segoe UI, Tahoma, sans-serif" font-size="26" text-anchor="middle">
+    <text x="360" y="706">720 &#215; 1280 (portrait, 9:16)</text>
+    <text x="360" y="748">Another person's wishlist, mid-use</text>
+    <text x="360" y="790">Claimed badges + price range + priority</text>
+    <text x="360" y="832">Christmas theme &#183; fabricated names only</text>
+  </g>
+</svg>

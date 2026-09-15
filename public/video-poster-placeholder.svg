@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" role="img" aria-label="Placeholder for the video poster frame">
+  <rect width="1280" height="720" fill="#eceef1"/>
+  <rect x="8" y="8" width="1264" height="704" fill="none" stroke="#c41e3a" stroke-width="6" stroke-dasharray="24 18"/>
+  <g font-family="Segoe UI, Tahoma, sans-serif" text-anchor="middle">
+    <text x="640" y="318" fill="#c41e3a" font-size="52" font-weight="700">PLACEHOLDER</text>
+    <text x="640" y="382" fill="#c41e3a" font-size="34" font-weight="600">Video poster frame</text>
+    <text x="640" y="446" fill="#666" font-size="26">1280 &#215; 720 (16:9)</text>
+  </g>
+</svg>
